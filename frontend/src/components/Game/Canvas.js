@@ -9,7 +9,11 @@ import { MessageCircle } from "lucide-react";
 import { Mic, MicOff, Video, VideoOff } from "lucide-react";
 import axios from "axios";
 
-const Canvas = () => {
+const Canvas = ({
+  roomCode = "default",
+  initialPlayerName = "",
+  userAvatar = "chr1",
+}) => {
   const canvasRef = useRef(null);
   const [ctx, setCtx] = useState(null);
   const socketRef = useRef(null);
@@ -22,8 +26,8 @@ const Canvas = () => {
     e: false,
   });
   const [showChat, setShowChat] = useState(false);
-  const [showNameModal, setShowNameModal] = useState(true);
-  const [tempPlayerName, setTempPlayerName] = useState("");
+  const [showNameModal, setShowNameModal] = useState(!initialPlayerName);
+  const [tempPlayerName, setTempPlayerName] = useState(initialPlayerName || "");
   const [incomingCall, setIncomingCall] = useState(null);
   const [videoCall, setVideoCall] = useState({
     active: false,
@@ -70,27 +74,43 @@ const Canvas = () => {
   } = useGame(canvasRef, socketRef, keysRef);
 
   // Initialize canvas and socket
-  const SOCKET_URL = "https://g-production-bfa0.up.railway.app/"; // your production backend URL
+  const SOCKET_URL =
+    process.env.REACT_APP_BACKEND_URL || "http://localhost:3001";
+
+  useEffect(() => {
+    if (initialPlayerName) {
+      setPlayerName(initialPlayerName);
+    }
+  }, [initialPlayerName, setPlayerName]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     const context = canvas.getContext("2d");
     setCtx(context);
-    socketRef.current = io(SOCKET_URL, { transports: ["websocket"] }); // use correct URL and force websocket
+    const socket = io(SOCKET_URL, { transports: ["websocket"] });
+    socketRef.current = socket;
+
+    socket.on("connect", () => {
+      const activeName = initialPlayerName || tempPlayerName || "Explorer";
+      socket.emit("joinRoom", {
+        roomCode,
+        playerName: activeName,
+        avatar: userAvatar,
+      });
+      socket.emit("register", activeName);
+    });
 
     return () => {
-      socketRef.current.disconnect();
+      socket.disconnect();
       cancelAnimationFrame(animationFrameRef.current);
     };
-  }, []);
+  }, [roomCode, initialPlayerName, userAvatar, SOCKET_URL]);
 
   // Fetch ICE servers from backend on mount
   useEffect(() => {
     const fetchIceServers = async () => {
       try {
-        const res = await axios.get(
-          "https://g-production-bfa0.up.railway.app/api/ice-token"
-        );
+        const res = await axios.get(`${SOCKET_URL}/api/ice-token`);
         setIceConfig(res.data); // expects { iceServers: [...] }
       } catch (err) {
         console.error("Failed to fetch ICE servers:", err);
@@ -101,7 +121,7 @@ const Canvas = () => {
       }
     };
     fetchIceServers();
-  }, []);
+  }, [SOCKET_URL]);
 
   // Handle name submission
   const handleNameSubmit = () => {
@@ -109,8 +129,13 @@ const Canvas = () => {
     setPlayerName(tempPlayerName);
     setShowNameModal(false);
 
-    // Register the name with the socket
+    // Register the name with the socket and join room
     if (socketRef.current) {
+      socketRef.current.emit("joinRoom", {
+        roomCode,
+        playerName: tempPlayerName,
+        avatar: userAvatar,
+      });
       socketRef.current.emit("register", tempPlayerName);
     }
   };

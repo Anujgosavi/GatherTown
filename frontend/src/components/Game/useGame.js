@@ -101,12 +101,13 @@ const useGame = (canvasRef, socketRef, keysRef) => {
   useEffect(() => {
     const fetchIceServers = async () => {
       try {
-        const res = await axios.get(
-          "https://g-production-bfa0.up.railway.app/api/ice-token"
-        );
+        const backendUrl =
+          process.env.REACT_APP_BACKEND_URL || "http://localhost:3001";
+        const res = await axios.get(`${backendUrl}/api/ice-token`);
         setIceConfig(res.data); // expects { iceServers: [...] }
       } catch (err) {
         console.error("Failed to fetch ICE servers:", err);
+        // fallback to public STUN if needed
         setIceConfig({
           iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
         });

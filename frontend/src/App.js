@@ -1,16 +1,26 @@
-import React from 'react';
-import Canvas from './components/Game/Canvas';
-import Particles from './components/Particles';
-import './App.css';
+import React from "react";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { AuthProvider } from "./context/AuthContext";
+import Login from "./pages/Login";
+import Register from "./pages/Register";
+import Dashboard from "./pages/Dashboard";
+import RoomView from "./pages/RoomView";
+import "./App.css";
 
 function App() {
   return (
-    <div className="App">
-      <Particles />
-      <div id="gameWrapper">
-        <Canvas />
-      </div>
-    </div>
+    <AuthProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/room/:roomCode" element={<RoomView />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </BrowserRouter>
+    </AuthProvider>
   );
 }
 

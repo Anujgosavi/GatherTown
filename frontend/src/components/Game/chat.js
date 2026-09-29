@@ -3,6 +3,9 @@ import "./chat.css";
 import axios from "axios";
 import { Paperclip } from "lucide-react";
 
+const BACKEND_URL =
+  process.env.REACT_APP_BACKEND_URL || "http://localhost:3001";
+
 function Chat({ username, socket, chatTargetId }) {
   const [message, setMessage] = useState("");
   const [onlineUsers, setOnlineuser] = useState([]);
@@ -28,19 +31,20 @@ function Chat({ username, socket, chatTargetId }) {
     const handleAllchattwo = (allchat, socketid) => {
       if (listner === socketid) setAllchat(allchat);
     };
-    socket.on("receive_message_sec", handleAllchattwo);
+
+    socket.on("message_sent", handleAllchattwo);
 
     return () => {
       socket.off("onlineUserswithnames", handleOnlineUserstwo);
       socket.off("receive_message", handleAllchat);
-      socket.off("receive_message_sec", handleAllchattwo);
+      socket.off("message_sent", handleAllchattwo);
     };
-  }, [listner, socket]);
+  }, [socket, username, listner]);
 
   useEffect(() => {
     if (chatTargetId && Object.values(userMap).includes(chatTargetId)) {
       setListner(chatTargetId);
-      socket.emit("getchathistory", chatTargetId);
+      socket.emit("getChatHistory", chatTargetId);
     }
   }, [chatTargetId, userMap, socket]);
 
@@ -52,9 +56,8 @@ function Chat({ username, socket, chatTargetId }) {
   };
 
   const startChat = (username) => {
-    const userKey = userMap[username];
-    setListner(userKey);
-    socket.emit("getchathistory", userKey);
+    setListner(userMap[username]);
+    socket.emit("getChatHistory", userMap[username]);
   };
 
   const handleFileChange = (e) => {
@@ -68,7 +71,7 @@ function Chat({ username, socket, chatTargetId }) {
       formData.append("file", file);
       try {
         const res = await axios.post(
-          "https://g-production-bfa0.up.railway.app/upload",
+          `${BACKEND_URL}/upload`,
           formData,
           {
             headers: { "Content-Type": "multipart/form-data" },
@@ -136,9 +139,8 @@ function Chat({ username, socket, chatTargetId }) {
                       sender === socket.id ? "sent" : "received"
                     }`}
                   >
-                    {message.startsWith(
-                      "https://g-production-bfa0.up.railway.app/upload"
-                    ) ? (
+                    {message.startsWith("http://") ||
+                    message.startsWith("https://") ? (
                       <a
                         href={message}
                         target="_blank"
