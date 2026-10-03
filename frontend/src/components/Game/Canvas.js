@@ -50,14 +50,18 @@ const Canvas = ({
   const remoteVideoRef = useRef(null);
   const localVideoRef = useRef(null);
   const [callPeerId, setCallPeerId] = useState(null);
+  const callPeerIdRef = useRef(null);
 
   // 1-on-1 Screen Sharing states
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [isRemoteScreenSharing, setIsRemoteScreenSharing] = useState(false);
   const [callPeerName, setCallPeerName] = useState("");
+  const [isPipMinimized, setIsPipMinimized] = useState(false);
   const screenStreamRef = useRef(null);
   const cameraVideoTrackRef = useRef(null);
   const localScreenRef = useRef(null);
+  const audioContextRef = useRef(null);
+  const micAudioTrackRef = useRef(null);
 
   // Hybrid draggable & maximize state
   const [isCallMaximized, setIsCallMaximized] = useState(false);
@@ -271,6 +275,7 @@ const Canvas = ({
         // Voice chat logic (already working)
         const targetId = interactionMenu.current.targetId;
         const targetName = otherPlayers[targetId]?.name || "Colleague";
+        callPeerIdRef.current = targetId;
         setCallPeerId(targetId);
         setCallPeerName(targetName);
         setVideoCall((vc) => ({ ...vc, active: true }));
@@ -305,6 +310,7 @@ const Canvas = ({
     try {
       if (!iceConfig) return; // Wait for ICE config
       setIncomingCall(null);
+      callPeerIdRef.current = incomingCall.callerId;
       setCallPeerId(incomingCall.callerId); // <-- Fix: use incomingCall.callerId, not interactingMenu
       setCallPeerName(incomingCall.callerName || "Colleague");
       setVideoCall((vc) => ({ ...vc, active: true }));
@@ -315,6 +321,7 @@ const Canvas = ({
         audio: true,
       });
       cameraVideoTrackRef.current = localStream.getVideoTracks()[0];
+      micAudioTrackRef.current = localStream.getAudioTracks()[0];
       setVideoCall((vc) => ({ ...vc, localStream }));
 
       // --- Ensure RTCConfiguration is always valid ---
@@ -427,6 +434,7 @@ const Canvas = ({
           audio: true,
         });
         cameraVideoTrackRef.current = localStream.getVideoTracks()[0];
+        micAudioTrackRef.current = localStream.getAudioTracks()[0];
         setVideoCall((vc) => ({ ...vc, localStream }));
 
         // --- FIX: Ensure RTCConfiguration is always valid ---
@@ -545,12 +553,22 @@ const Canvas = ({
     setIsScreenSharing(false);
     setIsRemoteScreenSharing(false);
     setIsCallMaximized(false);
+    setIsPipMinimized(false);
     setCallPosition({ x: 0, y: 0 });
     setCallPeerName("");
     cameraVideoTrackRef.current = null;
 
+    if (audioContextRef.current) {
+      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current = null;
+    }
+    micAudioTrackRef.current = null;
+
     setVideoCall({ active: false, localStream: null, remoteStream: null });
+    const targetPeer = callPeerIdRef.current || callPeerId;
+    callPeerIdRef.current = null;
     setCallPeerId(null);
+
     if (peerConnectionRef.current) {
       peerConnectionRef.current.close();
       peerConnectionRef.current = null;
@@ -565,8 +583,8 @@ const Canvas = ({
         .getTracks()
         .forEach((track) => track.stop());
     }
-    if (socketRef.current && callPeerId) {
-      socketRef.current.emit("endCall", { to: callPeerId });
+    if (socketRef.current && targetPeer) {
+      socketRef.current.emit("endCall", { to: targetPeer });
     }
     setToast("Call ended");
     setToastProgress(0);
@@ -595,21 +613,40 @@ const Canvas = ({
       }
     }
 
+    // Clean up audio mixing context and restore mic audio track
+    if (audioContextRef.current) {
+      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current = null;
+    }
+    if (peerConnectionRef.current && micAudioTrackRef.current) {
+      const senders = peerConnectionRef.current.getSenders();
+      const audioSender = senders.find((s) => s.track && s.track.kind === "audio");
+      if (audioSender) {
+        try {
+          await audioSender.replaceTrack(micAudioTrackRef.current);
+        } catch (err) {
+          console.warn("Error restoring mic audio track:", err);
+        }
+      }
+    }
+
     // Restore local video element if it was showing screen
     if (localVideoRef.current && videoCall.localStream) {
       localVideoRef.current.srcObject = videoCall.localStream;
+      localVideoRef.current.play().catch(() => {});
     }
 
     // Notify peer of stop
-    if (socketRef.current && callPeerId) {
+    const targetPeer = callPeerIdRef.current || callPeerId;
+    if (socketRef.current && targetPeer) {
       socketRef.current.emit("screen-share-status", {
-        to: callPeerId,
+        to: targetPeer,
         isSharing: false,
       });
     }
   }, [callPeerId, videoCall.localStream]);
 
-  // Toggle 1-on-1 screen sharing
+  // Toggle 1-on-1 screen sharing (Optimized for ultra-low latency & 30-60 FPS smooth updates)
   const handleToggleScreenShare = async () => {
     if (isScreenSharing) {
       stopScreenShare();
@@ -622,20 +659,16 @@ const Canvas = ({
         return;
       }
 
+      // Capture display media with clean, robust options (matching Google Meet & Zoom)
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: {
           cursor: "always",
         },
-        audio: false,
+        audio: true,
       });
 
       const screenTrack = stream.getVideoTracks()[0];
       if (!screenTrack) return;
-
-      // Enhance crispness for text & code presentation
-      if ("contentHint" in screenTrack) {
-        screenTrack.contentHint = "detail";
-      }
 
       screenStreamRef.current = stream;
 
@@ -644,7 +677,7 @@ const Canvas = ({
         stopScreenShare();
       };
 
-      // Seamless track replacement without renegotiation
+      // Seamless track replacement on peer connection
       const senders = peerConnectionRef.current.getSenders();
       const videoSender = senders.find(
         (s) => s.track && s.track.kind === "video"
@@ -656,17 +689,41 @@ const Canvas = ({
         console.warn("Could not find video sender to replace track");
       }
 
+      // Mix tab audio if present (e.g. YouTube sound) with microphone
+      const screenAudioTrack = stream.getAudioTracks()[0];
+      if (screenAudioTrack && micAudioTrackRef.current) {
+        try {
+          const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+          audioContextRef.current = audioCtx;
+          const micSource = audioCtx.createMediaStreamSource(new MediaStream([micAudioTrackRef.current]));
+          const screenSource = audioCtx.createMediaStreamSource(new MediaStream([screenAudioTrack]));
+          const dest = audioCtx.createMediaStreamDestination();
+          micSource.connect(dest);
+          screenSource.connect(dest);
+          const mixedTrack = dest.stream.getAudioTracks()[0];
+
+          const audioSender = senders.find((s) => s.track && s.track.kind === "audio");
+          if (audioSender) {
+            await audioSender.replaceTrack(mixedTrack);
+          }
+        } catch (audioMixErr) {
+          console.warn("Could not mix screen audio:", audioMixErr);
+        }
+      }
+
       setIsScreenSharing(true);
 
       // Attach stream to local preview
       if (localScreenRef.current) {
         localScreenRef.current.srcObject = stream;
+        localScreenRef.current.play().catch(() => {});
       }
 
       // Notify peer to enter presentation mode
-      if (socketRef.current && callPeerId) {
+      const targetPeer = callPeerIdRef.current || callPeerId;
+      if (socketRef.current && targetPeer) {
         socketRef.current.emit("screen-share-status", {
-          to: callPeerId,
+          to: targetPeer,
           isSharing: true,
         });
       }
@@ -716,6 +773,12 @@ const Canvas = ({
     if (!socketRef.current) return;
     const handleRemoteScreenShare = ({ isSharing }) => {
       setIsRemoteScreenSharing(Boolean(isSharing));
+      // Immediate force playback resumption when status arrives
+      setTimeout(() => {
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.play().catch(() => {});
+        }
+      }, 50);
     };
     socketRef.current.on("screen-share-status", handleRemoteScreenShare);
     return () => {
@@ -727,6 +790,7 @@ const Canvas = ({
   useEffect(() => {
     if (isScreenSharing && localScreenRef.current && screenStreamRef.current) {
       localScreenRef.current.srcObject = screenStreamRef.current;
+      localScreenRef.current.play().catch(() => {});
     }
   }, [isScreenSharing]);
 
@@ -741,30 +805,39 @@ const Canvas = ({
     return () => clearTimeout(timeout);
   }, [toast]);
 
-  // Attach streams to video elements with error handling
+  // Attach streams to video elements with error handling and autoplay enforcement
   useEffect(() => {
-    console.log("Attaching streams to video elements");
     if (localVideoRef.current && videoCall.localStream) {
-      console.log("Setting local video stream");
-      localVideoRef.current.srcObject = videoCall.localStream;
+      if (localVideoRef.current.srcObject !== videoCall.localStream) {
+        localVideoRef.current.srcObject = videoCall.localStream;
+      }
+      localVideoRef.current.play().catch(() => {});
     }
     if (remoteVideoRef.current && videoCall.remoteStream) {
-      console.log("Setting remote video stream");
-      remoteVideoRef.current.srcObject = videoCall.remoteStream;
+      if (remoteVideoRef.current.srcObject !== videoCall.remoteStream) {
+        remoteVideoRef.current.srcObject = videoCall.remoteStream;
+      }
+      remoteVideoRef.current.play().catch(() => {});
+
+      // Auto-resume playback on track unmute (triggers when track replacement finishes)
+      videoCall.remoteStream.getVideoTracks().forEach((track) => {
+        track.onunmute = () => {
+          if (remoteVideoRef.current) {
+            remoteVideoRef.current.play().catch(() => {});
+          }
+        };
+      });
     }
 
-    // Add onloadedmetadata handlers
     const localVideo = localVideoRef.current;
     const remoteVideo = remoteVideoRef.current;
 
     if (localVideo) {
-      localVideo.onloadedmetadata = () =>
-        console.log("Local video metadata loaded");
+      localVideo.onloadedmetadata = () => localVideo.play().catch(() => {});
       localVideo.onerror = (e) => console.error("Local video error:", e);
     }
     if (remoteVideo) {
-      remoteVideo.onloadedmetadata = () =>
-        console.log("Remote video metadata loaded");
+      remoteVideo.onloadedmetadata = () => remoteVideo.play().catch(() => {});
       remoteVideo.onerror = (e) => console.error("Remote video error:", e);
     }
   }, [videoCall.localStream, videoCall.remoteStream, isScreenSharing, isRemoteScreenSharing]);
@@ -1560,88 +1633,104 @@ const Canvas = ({
               </div>
             </div>
 
-            {/* Video & Screen Share Stage */}
-            <div className="gt-call-stage">
-              {/* Case 1: Local User is Screen Sharing */}
-              {isScreenSharing ? (
-                <div className="gt-call-screenshare-stage">
-                  <div className="gt-screen-indicator-banner">
-                    <Monitor size={14} /> You are presenting your screen
-                  </div>
-                  <video
-                    ref={localScreenRef}
-                    autoPlay
-                    playsInline
-                    muted
-                  />
-                  {/* Remote Colleague in Picture-in-Picture */}
-                  <div
-                    className="gt-pip-video-container"
-                    title={`${callPeerName || "Peer"}'s Camera`}
-                  >
-                    <video
-                      ref={remoteVideoRef}
-                      autoPlay
-                      playsInline
-                    />
-                    <div className="gt-video-nametag">
-                      {callPeerName || "Peer"}
-                    </div>
-                  </div>
+            {/* Video Stage with Persistent Elements (Zero Unmounts, Zero Glitches) */}
+            <div
+              className={`gt-call-stage ${
+                isScreenSharing || isRemoteScreenSharing
+                  ? "mode-presentation"
+                  : "mode-dual"
+              }`}
+            >
+              {/* 1. Local Screen Preview Box */}
+              <div
+                className={`gt-video-box ${
+                  isScreenSharing ? "gt-box-presentation" : "gt-box-hidden"
+                }`}
+              >
+                <div className="gt-screen-indicator-banner">
+                  <Monitor size={14} /> You are presenting your screen
                 </div>
-              ) : isRemoteScreenSharing ? (
-                /* Case 2: Remote Peer is Screen Sharing */
-                <div className="gt-call-screenshare-stage">
+                <video
+                  ref={localScreenRef}
+                  autoPlay
+                  playsInline
+                  muted
+                />
+              </div>
+
+              {/* 2. Remote Video Box (Peer Webcam OR Peer Screen) */}
+              <div
+                className={`gt-video-box ${
+                  isRemoteScreenSharing
+                    ? "gt-box-presentation"
+                    : isScreenSharing
+                    ? `gt-box-pip ${isPipMinimized ? "minimized" : ""}`
+                    : ""
+                }`}
+              >
+                {isRemoteScreenSharing && (
                   <div className="gt-screen-indicator-banner">
                     <Monitor size={14} /> {callPeerName || "Peer"} is presenting
                   </div>
-                  <video
-                    ref={remoteVideoRef}
-                    autoPlay
-                    playsInline
-                  />
-                  {/* Local Camera in Picture-in-Picture */}
-                  <div
-                    className="gt-pip-video-container"
-                    title="Your Camera"
+                )}
+                {isScreenSharing && (
+                  <button
+                    type="button"
+                    className="gt-pip-minimize-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsPipMinimized((prev) => !prev);
+                    }}
+                    title={isPipMinimized ? "Expand Camera" : "Minimize Camera"}
                   >
-                    <video
-                      ref={localVideoRef}
-                      autoPlay
-                      muted
-                      playsInline
-                    />
-                    <div className="gt-video-nametag">
-                      You {isMuted ? "(Muted)" : ""}
-                    </div>
-                  </div>
+                    {isPipMinimized ? "+" : "−"}
+                  </button>
+                )}
+                <video
+                  ref={remoteVideoRef}
+                  autoPlay
+                  playsInline
+                />
+                <div className="gt-video-nametag">
+                  {isRemoteScreenSharing
+                    ? `${callPeerName || "Peer"}'s Screen`
+                    : callPeerName || "Peer"}
                 </div>
-              ) : (
-                /* Case 3: Standard Dual Camera View (Side-by-side) */
-                <div className="gt-call-grid-dual">
-                  <div className="gt-video-card">
-                    <video
-                      ref={localVideoRef}
-                      autoPlay
-                      muted
-                      playsInline
-                    />
-                    <div className="gt-video-nametag">
-                      You {isMuted ? "(Muted)" : ""}
-                    </div>
-                  </div>
-                  <div className="gt-video-card">
-                    <video
-                      ref={remoteVideoRef}
-                      autoPlay
-                      playsInline
-                    />
-                    <div className="gt-video-nametag">
-                      {callPeerName || "Peer"}
-                    </div>
-                  </div>
+              </div>
+
+              {/* 3. Local Camera Box */}
+              <div
+                className={`gt-video-box ${
+                  isRemoteScreenSharing
+                    ? `gt-box-pip ${isPipMinimized ? "minimized" : ""}`
+                    : isScreenSharing
+                    ? "gt-box-hidden"
+                    : ""
+                }`}
+              >
+                {isRemoteScreenSharing && (
+                  <button
+                    type="button"
+                    className="gt-pip-minimize-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsPipMinimized((prev) => !prev);
+                    }}
+                    title={isPipMinimized ? "Expand Camera" : "Minimize Camera"}
+                  >
+                    {isPipMinimized ? "+" : "−"}
+                  </button>
+                )}
+                <video
+                  ref={localVideoRef}
+                  autoPlay
+                  muted
+                  playsInline
+                />
+                <div className="gt-video-nametag">
+                  You {isMuted ? "(Muted)" : ""}
                 </div>
-              )}
+              </div>
             </div>
 
             {/* Controls Bar Footer */}

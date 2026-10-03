@@ -42,8 +42,10 @@
 }
 
 .gt-call-window.screenshare-standard {
-  width: 860px;
-  max-width: 95vw;
+  width: 1040px;
+  max-width: 96vw;
+  height: 680px;
+  max-height: 88vh;
 }
 
 /* Maximized full-window size */
@@ -151,99 +153,165 @@
 /* Video Stage */
 .gt-call-stage {
   flex: 1;
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
+  padding: 14px;
   position: relative;
   overflow: hidden;
   background: #090d16;
+  min-height: 420px;
+  display: flex;
 }
 
-/* Standard Dual Camera Grid */
-.gt-call-grid-dual {
+/* =========================================
+   PERSISTENT VIDEO BOX ARCHITECTURE
+   ========================================= */
+
+/* Stage in Mode: Dual Camera */
+.gt-call-stage.mode-dual {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 16px;
-  width: 100%;
-  height: 100%;
   align-items: center;
+  justify-content: center;
 }
 
 @media (max-width: 680px) {
-  .gt-call-grid-dual {
+  .gt-call-stage.mode-dual {
     grid-template-columns: 1fr;
   }
 }
 
-.gt-video-card {
+/* Stage in Mode: Presentation (Someone is sharing screen) */
+.gt-call-stage.mode-presentation {
+  display: flex;
   position: relative;
   width: 100%;
   height: 100%;
-  min-height: 250px;
-  background: #020617;
+  padding: 10px;
+}
+
+/* Base Video Box */
+.gt-video-box {
+  position: relative;
   border-radius: 14px;
   overflow: hidden;
+  background: #020617;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Mode Dual: Both video boxes take full grid tile */
+.gt-call-stage.mode-dual .gt-video-box {
+  width: 100%;
+  height: 100%;
+  min-height: 250px;
   border: 2px solid rgba(255, 255, 255, 0.08);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
 }
 
-.gt-video-card video {
+.gt-call-stage.mode-dual .gt-video-box video {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
 }
 
-/* Screen Sharing Stage Layout */
-.gt-call-screenshare-stage {
+/* Hide local screen preview when not sharing */
+.gt-box-hidden {
+  display: none !important;
+}
+
+/* Mode Presentation: Main presentation screen */
+.gt-box-presentation {
   flex: 1;
-  position: relative;
-  width: 100%;
-  height: 100%;
+  width: 100% !important;
+  height: 100% !important;
   min-height: 400px;
-  display: flex;
+  display: flex !important;
   align-items: center;
   justify-content: center;
-  background: #020617;
-  border-radius: 14px;
-  overflow: hidden;
-  border: 2px solid rgba(99, 102, 241, 0.3);
+  border: 2px solid rgba(99, 102, 241, 0.35);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
+  background: #000000;
+  position: relative;
 }
 
-.gt-call-screenshare-stage video {
-  width: 100%;
-  height: 100%;
-  object-fit: contain; /* Never crop screen text/code */
+.gt-box-presentation video {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain !important; /* Zero cropping, preserves 100% of the screen */
   background: #000;
+  display: block;
 }
 
-/* Floating Picture-in-Picture webcam */
-.gt-pip-video-container {
-  position: absolute;
-  right: 14px;
-  bottom: 14px;
-  width: 180px;
-  height: 120px;
+/* Mode Presentation: Picture-in-Picture webcam */
+.gt-box-pip {
+  position: absolute !important;
+  top: 20px;
+  right: 20px;
+  width: 180px !important;
+  height: 115px !important;
   border-radius: 12px;
   overflow: hidden;
-  border: 2px solid rgba(99, 102, 241, 0.6);
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.8);
+  border: 2px solid rgba(99, 102, 241, 0.7);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.85);
   background: #090d16;
-  z-index: 10;
-  transition: all 0.2s;
+  z-index: 25;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.gt-pip-video-container:hover {
-  transform: scale(1.05);
-  border-color: #818cf8;
+.gt-box-pip:hover {
+  border-color: #a5b4fc;
 }
 
-.gt-pip-video-container video {
+.gt-box-pip video {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  display: block;
+}
+
+/* Minimized PIP: Collapses into a non-intrusive badge when user needs full corner visibility */
+.gt-box-pip.minimized {
+  width: auto !important;
+  height: 36px !important;
+  padding: 0 12px;
+  background: rgba(15, 23, 42, 0.9);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(99, 102, 241, 0.5);
+  border-radius: 9999px;
+  display: flex !important;
+  align-items: center;
+  cursor: pointer;
+}
+
+.gt-box-pip.minimized video {
+  display: none !important;
+}
+
+.gt-pip-minimize-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  background: rgba(0, 0, 0, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 50%;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 30;
+  font-size: 13px;
+  font-weight: bold;
+  line-height: 1;
+  transition: background 0.15s;
+}
+
+.gt-pip-minimize-btn:hover {
+  background: rgba(99, 102, 241, 0.8);
 }
 
 /* Nametag Overlay Pill */
