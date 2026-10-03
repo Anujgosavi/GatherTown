@@ -5,8 +5,20 @@ import io from "socket.io-client";
 import "./styles.css";
 import useGame from "./useGame";
 import Chat from "./chat";
-import { MessageCircle } from "lucide-react";
-import { Mic, MicOff, Video, VideoOff } from "lucide-react";
+import {
+  MessageCircle,
+  Mic,
+  MicOff,
+  Video,
+  VideoOff,
+  Monitor,
+  MonitorOff,
+  Maximize2,
+  Minimize2,
+  PhoneOff,
+  GripHorizontal,
+} from "lucide-react";
+import "./VideoCall.css";
 import axios from "axios";
 
 const Canvas = ({
@@ -38,6 +50,20 @@ const Canvas = ({
   const remoteVideoRef = useRef(null);
   const localVideoRef = useRef(null);
   const [callPeerId, setCallPeerId] = useState(null);
+
+  // 1-on-1 Screen Sharing states
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [isRemoteScreenSharing, setIsRemoteScreenSharing] = useState(false);
+  const [callPeerName, setCallPeerName] = useState("");
+  const screenStreamRef = useRef(null);
+  const cameraVideoTrackRef = useRef(null);
+  const localScreenRef = useRef(null);
+
+  // Hybrid draggable & maximize state
+  const [isCallMaximized, setIsCallMaximized] = useState(false);
+  const [callPosition, setCallPosition] = useState({ x: 0, y: 0 });
+  const isDraggingRef = useRef(false);
+  const dragStartRef = useRef({ x: 0, y: 0 });
   const [iceConfig, setIceConfig] = useState(null);
   const iceCandidateQueue = useRef({}); // { peerId: [candidates] }
   const [toast, setToast] = useState(null);
@@ -243,11 +269,14 @@ const Canvas = ({
         interactionMenu.current.targetId
       ) {
         // Voice chat logic (already working)
-        setCallPeerId(interactionMenu.current.targetId);
+        const targetId = interactionMenu.current.targetId;
+        const targetName = otherPlayers[targetId]?.name || "Colleague";
+        setCallPeerId(targetId);
+        setCallPeerName(targetName);
         setVideoCall((vc) => ({ ...vc, active: true }));
         if (socketRef.current) {
           socketRef.current.emit("callUser", {
-            targetId: interactionMenu.current.targetId,
+            targetId,
             callerName: playerName,
           });
         }
@@ -277,6 +306,7 @@ const Canvas = ({
       if (!iceConfig) return; // Wait for ICE config
       setIncomingCall(null);
       setCallPeerId(incomingCall.callerId); // <-- Fix: use incomingCall.callerId, not interactingMenu
+      setCallPeerName(incomingCall.callerName || "Colleague");
       setVideoCall((vc) => ({ ...vc, active: true }));
 
       // Get local media
@@ -284,6 +314,7 @@ const Canvas = ({
         video: true,
         audio: true,
       });
+      cameraVideoTrackRef.current = localStream.getVideoTracks()[0];
       setVideoCall((vc) => ({ ...vc, localStream }));
 
       // --- Ensure RTCConfiguration is always valid ---
@@ -395,6 +426,7 @@ const Canvas = ({
           video: true,
           audio: true,
         });
+        cameraVideoTrackRef.current = localStream.getVideoTracks()[0];
         setVideoCall((vc) => ({ ...vc, localStream }));
 
         // --- FIX: Ensure RTCConfiguration is always valid ---
@@ -506,6 +538,17 @@ const Canvas = ({
 
   // Cleanup on call end
   const handleEndCall = () => {
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach((track) => track.stop());
+      screenStreamRef.current = null;
+    }
+    setIsScreenSharing(false);
+    setIsRemoteScreenSharing(false);
+    setIsCallMaximized(false);
+    setCallPosition({ x: 0, y: 0 });
+    setCallPeerName("");
+    cameraVideoTrackRef.current = null;
+
     setVideoCall({ active: false, localStream: null, remoteStream: null });
     setCallPeerId(null);
     if (peerConnectionRef.current) {
@@ -528,6 +571,164 @@ const Canvas = ({
     setToast("Call ended");
     setToastProgress(0);
   };
+
+  // Stop 1-on-1 screen sharing and restore camera
+  const stopScreenShare = useCallback(async () => {
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach((track) => track.stop());
+      screenStreamRef.current = null;
+    }
+    setIsScreenSharing(false);
+
+    // Restore camera video track on peer connection without drops
+    if (peerConnectionRef.current && cameraVideoTrackRef.current) {
+      const senders = peerConnectionRef.current.getSenders();
+      const videoSender = senders.find(
+        (s) => s.track && s.track.kind === "video"
+      ) || senders.find((s) => s.track === null);
+      if (videoSender) {
+        try {
+          await videoSender.replaceTrack(cameraVideoTrackRef.current);
+        } catch (err) {
+          console.error("Error restoring camera track:", err);
+        }
+      }
+    }
+
+    // Restore local video element if it was showing screen
+    if (localVideoRef.current && videoCall.localStream) {
+      localVideoRef.current.srcObject = videoCall.localStream;
+    }
+
+    // Notify peer of stop
+    if (socketRef.current && callPeerId) {
+      socketRef.current.emit("screen-share-status", {
+        to: callPeerId,
+        isSharing: false,
+      });
+    }
+  }, [callPeerId, videoCall.localStream]);
+
+  // Toggle 1-on-1 screen sharing
+  const handleToggleScreenShare = async () => {
+    if (isScreenSharing) {
+      stopScreenShare();
+      return;
+    }
+
+    try {
+      if (!peerConnectionRef.current) {
+        console.warn("No active peer connection for screen sharing");
+        return;
+      }
+
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          cursor: "always",
+        },
+        audio: false,
+      });
+
+      const screenTrack = stream.getVideoTracks()[0];
+      if (!screenTrack) return;
+
+      // Enhance crispness for text & code presentation
+      if ("contentHint" in screenTrack) {
+        screenTrack.contentHint = "detail";
+      }
+
+      screenStreamRef.current = stream;
+
+      // When user stops screen sharing via browser floating pill
+      screenTrack.onended = () => {
+        stopScreenShare();
+      };
+
+      // Seamless track replacement without renegotiation
+      const senders = peerConnectionRef.current.getSenders();
+      const videoSender = senders.find(
+        (s) => s.track && s.track.kind === "video"
+      ) || senders.find((s) => s.track === null);
+
+      if (videoSender) {
+        await videoSender.replaceTrack(screenTrack);
+      } else {
+        console.warn("Could not find video sender to replace track");
+      }
+
+      setIsScreenSharing(true);
+
+      // Attach stream to local preview
+      if (localScreenRef.current) {
+        localScreenRef.current.srcObject = stream;
+      }
+
+      // Notify peer to enter presentation mode
+      if (socketRef.current && callPeerId) {
+        socketRef.current.emit("screen-share-status", {
+          to: callPeerId,
+          isSharing: true,
+        });
+      }
+    } catch (err) {
+      if (err.name === "NotAllowedError" || err.name === "AbortError") {
+        console.log("User cancelled screen share picker dialog");
+      } else {
+        console.error("Error starting screen share:", err);
+      }
+    }
+  };
+
+  // Drag mouse handler
+  const handleDragMouseDown = (e) => {
+    if (isCallMaximized) return;
+    if (e.target.closest("button")) return;
+    isDraggingRef.current = true;
+    dragStartRef.current = {
+      x: e.clientX - callPosition.x,
+      y: e.clientY - callPosition.y,
+    };
+  };
+
+  useEffect(() => {
+    const handleMouseMove = (e) => {
+      if (!isDraggingRef.current) return;
+      setCallPosition({
+        x: e.clientX - dragStartRef.current.x,
+        y: e.clientY - dragStartRef.current.y,
+      });
+    };
+
+    const handleMouseUp = () => {
+      isDraggingRef.current = false;
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, []);
+
+  // Listen for remote peer screen sharing status
+  useEffect(() => {
+    if (!socketRef.current) return;
+    const handleRemoteScreenShare = ({ isSharing }) => {
+      setIsRemoteScreenSharing(Boolean(isSharing));
+    };
+    socketRef.current.on("screen-share-status", handleRemoteScreenShare);
+    return () => {
+      socketRef.current.off("screen-share-status", handleRemoteScreenShare);
+    };
+  }, []);
+
+  // Ensure local screen preview has stream attached
+  useEffect(() => {
+    if (isScreenSharing && localScreenRef.current && screenStreamRef.current) {
+      localScreenRef.current.srcObject = screenStreamRef.current;
+    }
+  }, [isScreenSharing]);
 
   // Animate toast visibility (no progress bar)
   useEffect(() => {
@@ -566,7 +767,7 @@ const Canvas = ({
         console.log("Remote video metadata loaded");
       remoteVideo.onerror = (e) => console.error("Remote video error:", e);
     }
-  }, [videoCall.localStream, videoCall.remoteStream]);
+  }, [videoCall.localStream, videoCall.remoteStream, isScreenSharing, isRemoteScreenSharing]);
 
   // Listen for call end from peer
   useEffect(() => {
@@ -1290,188 +1491,216 @@ const Canvas = ({
           </div>
         </div>
       )}
-      {/* Video Call Modal */}
+      {/* 1-on-1 Video Call & Hybrid Draggable / Maximized Screen Share Modal */}
       {videoCall.active && (
         <div
-          style={{
-            position: "fixed",
-            left: 0,
-            right: 0,
-            top: 0,
-            bottom: 0,
-            background: "rgba(0,0,0,0.7)",
-            zIndex: 3000,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
+          className={`gt-call-modal-overlay ${isCallMaximized ? "maximized" : ""}`}
         >
           <div
-            style={{
-              background: "linear-gradient(135deg, #f8fafc 0%, #e6e9f0 100%)",
-              borderRadius: "20px",
-              padding: "36px 38px 28px 38px",
-              boxShadow: "0 8px 32px rgba(50,60,90,0.18), 0 0px 0px #0000",
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              minWidth: 540,
-              minHeight: 410,
-              border: "1.5px solid #e0e6ff",
-              fontFamily: "'Press Start 2P', 'VT323', 'monospace', monospace",
-              color: "#23272e",
-              letterSpacing: "1px",
-              userSelect: "none",
-              textAlign: "center",
-              position: "relative",
-            }}
+            className={`gt-call-window ${
+              isCallMaximized
+                ? "maximized"
+                : isScreenSharing || isRemoteScreenSharing
+                ? "screenshare-standard"
+                : "standard"
+            }`}
+            style={
+              isCallMaximized
+                ? {}
+                : {
+                    transform: `translate(${callPosition.x}px, ${callPosition.y}px)`,
+                  }
+            }
           >
+            {/* Draggable Header */}
             <div
-              style={{
-                fontWeight: "bold",
-                color: "#4a6cf7",
-                textShadow: "0 2px 0 #e0e6ff, 0 0px 8px #4a6cf733",
-                fontSize: 28,
-                letterSpacing: "2px",
-                marginBottom: 18,
-                marginTop: 2,
-                fontFamily: "'Press Start 2P', 'VT323', 'monospace', monospace",
-              }}
+              className="gt-call-header"
+              onMouseDown={handleDragMouseDown}
+              title={
+                isCallMaximized
+                  ? "Call window maximized"
+                  : "Drag to reposition call window"
+              }
             >
-              Video Call
+              <div className="gt-call-title-area">
+                {!isCallMaximized && (
+                  <div className="gt-call-drag-icon">
+                    <GripHorizontal size={18} />
+                  </div>
+                )}
+                <div className="gt-call-status-dot" />
+                <span className="gt-call-title">
+                  {callPeerName ? `Call with ${callPeerName}` : "1-on-1 Call"}
+                </span>
+                {(isScreenSharing || isRemoteScreenSharing) && (
+                  <span className="gt-call-badge">
+                    <Monitor size={12} />
+                    {isScreenSharing
+                      ? "Sharing Screen"
+                      : `${callPeerName || "Peer"}'s Screen`}
+                  </span>
+                )}
+              </div>
+
+              <div className="gt-call-header-actions">
+                <button
+                  type="button"
+                  className="gt-header-btn"
+                  onClick={() => setIsCallMaximized((prev) => !prev)}
+                  title={
+                    isCallMaximized ? "Restore Window" : "Maximize Full Window"
+                  }
+                >
+                  {isCallMaximized ? (
+                    <Minimize2 size={16} />
+                  ) : (
+                    <Maximize2 size={16} />
+                  )}
+                </button>
+              </div>
             </div>
-            <div
-              style={{
-                display: "flex",
-                gap: 36,
-                margin: "0 0 14px 0",
-                justifyContent: "center",
-                alignItems: "center",
-              }}
-            >
-              <video
-                ref={localVideoRef}
-                autoPlay
-                muted
-                playsInline
-                style={{
-                  width: 340,
-                  height: 240,
-                  borderRadius: 14,
-                  background: "#222",
-                  border: "2px solid #4a6cf7",
-                  boxShadow: "0 2px 12px #4a6cf722",
-                  objectFit: "cover",
-                  transition: "border 0.2s",
-                }}
-              />
-              <video
-                ref={remoteVideoRef}
-                autoPlay
-                playsInline
-                style={{
-                  width: 340,
-                  height: 240,
-                  borderRadius: 14,
-                  background: "#222",
-                  border: "2px solid #4a6cf7",
-                  boxShadow: "0 2px 12px #4a6cf722",
-                  objectFit: "cover",
-                  transition: "border 0.2s",
-                }}
-              />
+
+            {/* Video & Screen Share Stage */}
+            <div className="gt-call-stage">
+              {/* Case 1: Local User is Screen Sharing */}
+              {isScreenSharing ? (
+                <div className="gt-call-screenshare-stage">
+                  <div className="gt-screen-indicator-banner">
+                    <Monitor size={14} /> You are presenting your screen
+                  </div>
+                  <video
+                    ref={localScreenRef}
+                    autoPlay
+                    playsInline
+                    muted
+                  />
+                  {/* Remote Colleague in Picture-in-Picture */}
+                  <div
+                    className="gt-pip-video-container"
+                    title={`${callPeerName || "Peer"}'s Camera`}
+                  >
+                    <video
+                      ref={remoteVideoRef}
+                      autoPlay
+                      playsInline
+                    />
+                    <div className="gt-video-nametag">
+                      {callPeerName || "Peer"}
+                    </div>
+                  </div>
+                </div>
+              ) : isRemoteScreenSharing ? (
+                /* Case 2: Remote Peer is Screen Sharing */
+                <div className="gt-call-screenshare-stage">
+                  <div className="gt-screen-indicator-banner">
+                    <Monitor size={14} /> {callPeerName || "Peer"} is presenting
+                  </div>
+                  <video
+                    ref={remoteVideoRef}
+                    autoPlay
+                    playsInline
+                  />
+                  {/* Local Camera in Picture-in-Picture */}
+                  <div
+                    className="gt-pip-video-container"
+                    title="Your Camera"
+                  >
+                    <video
+                      ref={localVideoRef}
+                      autoPlay
+                      muted
+                      playsInline
+                    />
+                    <div className="gt-video-nametag">
+                      You {isMuted ? "(Muted)" : ""}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                /* Case 3: Standard Dual Camera View (Side-by-side) */
+                <div className="gt-call-grid-dual">
+                  <div className="gt-video-card">
+                    <video
+                      ref={localVideoRef}
+                      autoPlay
+                      muted
+                      playsInline
+                    />
+                    <div className="gt-video-nametag">
+                      You {isMuted ? "(Muted)" : ""}
+                    </div>
+                  </div>
+                  <div className="gt-video-card">
+                    <video
+                      ref={remoteVideoRef}
+                      autoPlay
+                      playsInline
+                    />
+                    <div className="gt-video-nametag">
+                      {callPeerName || "Peer"}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
-            {/* Mute/Unmute and Video On/Off Controls */}
-            <div
-              style={{
-                display: "flex",
-                gap: 24,
-                margin: "14px 0 0 0",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
+
+            {/* Controls Bar Footer */}
+            <div className="gt-call-footer">
+              {/* Mic Toggle */}
               <button
+                type="button"
+                className={`gt-call-btn ${
+                  isMuted ? "gt-btn-control-off" : "gt-btn-control-active"
+                }`}
                 onClick={handleToggleMute}
-                style={{
-                  background: isMuted
-                    ? "linear-gradient(90deg, #ffb199 0%, #ff4b4b 100%)"
-                    : "linear-gradient(90deg, #4CAF50 0%, #43e97b 100%)",
-                  color: "#fff",
-                  border: "none",
-                  borderRadius: "50%",
-                  width: 48,
-                  height: 48,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  cursor: "pointer",
-                  boxShadow: "0 2px 8px #4a6cf744",
-                  fontSize: 22,
-                  transition: "background 0.2s",
-                }}
-                title={isMuted ? "Unmute" : "Mute"}
+                title={isMuted ? "Unmute Microphone" : "Mute Microphone"}
               >
-                {isMuted ? <MicOff size={28} /> : <Mic size={28} />}
+                {isMuted ? <MicOff size={18} /> : <Mic size={18} />}
+                <span>{isMuted ? "Unmute" : "Mute"}</span>
               </button>
+
+              {/* Camera Toggle */}
               <button
+                type="button"
+                className={`gt-call-btn ${
+                  isVideoOff ? "gt-btn-control-off" : "gt-btn-control-active"
+                }`}
                 onClick={handleToggleVideo}
-                style={{
-                  background: isVideoOff
-                    ? "linear-gradient(90deg, #ffb199 0%, #ff4b4b 100%)"
-                    : "linear-gradient(90deg, #4a6cf7 0%, #43e97b 100%)",
-                  color: "#fff",
-                  border: "none",
-                  borderRadius: "50%",
-                  width: 48,
-                  height: 48,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  cursor: "pointer",
-                  boxShadow: "0 2px 8px #4a6cf744",
-                  fontSize: 22,
-                  transition: "background 0.2s",
-                }}
                 title={isVideoOff ? "Turn Video On" : "Turn Video Off"}
               >
-                {isVideoOff ? <VideoOff size={28} /> : <Video size={28} />}
+                {isVideoOff ? <VideoOff size={18} /> : <Video size={18} />}
+                <span>{isVideoOff ? "Start Video" : "Stop Video"}</span>
               </button>
+
+              {/* Screen Share Toggle */}
               <button
-                style={{
-                  background:
-                    "linear-gradient(90deg, #ff4b4b 0%, #ffb199 100%)",
-                  color: "white",
-                  border: "none",
-                  borderRadius: "10px",
-                  padding: "13px 34px",
-                  fontSize: 18,
-                  fontFamily: "inherit",
-                  fontWeight: "bold",
-                  cursor: "pointer",
-                  boxShadow: "0 2px 8px #ff4b4b44",
-                  letterSpacing: "1px",
-                  marginLeft: 16,
-                  outline: "none",
-                  transition: "background 0.2s",
-                }}
-                onClick={handleEndCall}
+                type="button"
+                className={`gt-call-btn gt-btn-screenshare ${
+                  isScreenSharing ? "active" : ""
+                }`}
+                onClick={handleToggleScreenShare}
+                title={
+                  isScreenSharing ? "Stop Sharing Screen" : "Share Your Screen"
+                }
               >
-                End Call
+                {isScreenSharing ? (
+                  <MonitorOff size={18} />
+                ) : (
+                  <Monitor size={18} />
+                )}
+                <span>{isScreenSharing ? "Stop Sharing" : "Share Screen"}</span>
               </button>
-            </div>
-            <div
-              style={{
-                marginTop: 14,
-                fontSize: 13,
-                color: "#4a6cf7",
-                letterSpacing: "0.5px",
-                fontFamily: "inherit",
-                textShadow: "0 1px 0 #fff",
-                fontWeight: "bold",
-              }}
-            >
-              Socialize for XP!
+
+              {/* End Call */}
+              <button
+                type="button"
+                className="gt-call-btn gt-btn-endcall"
+                onClick={handleEndCall}
+                title="End Call"
+              >
+                <PhoneOff size={18} />
+                <span>End Call</span>
+              </button>
             </div>
           </div>
         </div>

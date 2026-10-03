@@ -268,6 +268,12 @@ io.on("connection", (socket) => {
     }
   });
 
+  socket.on("screen-share-status", ({ to, isSharing }) => {
+    if (to) {
+      io.to(to).emit("screen-share-status", { from: socket.id, isSharing });
+    }
+  });
+
   // ===== MEETING / CONFERENCE ROOM (Zone 2) =====
   socket.on("joinMeetingRoom", () => {
     const room = getRoom(socket.roomCode);

@@ -1,0 +1,371 @@
+/* 1-on-1 Video Call & Screen Sharing Styles */
+
+.gt-call-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  z-index: 3000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  transition: background 0.25s ease;
+}
+
+.gt-call-modal-overlay.maximized {
+  background: rgba(3, 7, 18, 0.9);
+}
+
+.gt-call-window {
+  position: absolute;
+  background: rgba(15, 23, 42, 0.95);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 20px;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.6), 0 0 35px rgba(99, 102, 241, 0.2);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+              height 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+              border-radius 0.3s ease;
+  user-select: none;
+}
+
+/* Default floating window size */
+.gt-call-window.standard {
+  width: 760px;
+  max-width: 95vw;
+}
+
+.gt-call-window.screenshare-standard {
+  width: 860px;
+  max-width: 95vw;
+}
+
+/* Maximized full-window size */
+.gt-call-window.maximized {
+  position: fixed !important;
+  top: 16px !important;
+  left: 16px !important;
+  right: 16px !important;
+  bottom: 16px !important;
+  width: calc(100vw - 32px) !important;
+  height: calc(100vh - 32px) !important;
+  transform: none !important;
+  border-radius: 16px;
+  z-index: 4000;
+}
+
+/* Header & Drag Handle */
+.gt-call-header {
+  height: 48px;
+  padding: 0 18px;
+  background: rgba(30, 41, 59, 0.6);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: grab;
+}
+
+.gt-call-header:active {
+  cursor: grabbing;
+}
+
+.gt-call-title-area {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.gt-call-drag-icon {
+  color: #64748b;
+  display: flex;
+  align-items: center;
+}
+
+.gt-call-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 8px #10b981;
+  animation: pulseGreen 2s infinite;
+}
+
+@keyframes pulseGreen {
+  0% { transform: scale(0.95); opacity: 0.8; }
+  50% { transform: scale(1.15); opacity: 1; }
+  100% { transform: scale(0.95); opacity: 0.8; }
+}
+
+.gt-call-title {
+  color: #f1f5f9;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.gt-call-badge {
+  background: rgba(99, 102, 241, 0.2);
+  border: 1px solid rgba(99, 102, 241, 0.4);
+  color: #a5b4fc;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.gt-call-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.gt-header-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: none;
+  color: #94a3b8;
+  border-radius: 8px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.gt-header-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+}
+
+/* Video Stage */
+.gt-call-stage {
+  flex: 1;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+  background: #090d16;
+}
+
+/* Standard Dual Camera Grid */
+.gt-call-grid-dual {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+}
+
+@media (max-width: 680px) {
+  .gt-call-grid-dual {
+    grid-template-columns: 1fr;
+  }
+}
+
+.gt-video-card {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 250px;
+  background: #020617;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 2px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+}
+
+.gt-video-card video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Screen Sharing Stage Layout */
+.gt-call-screenshare-stage {
+  flex: 1;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 400px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #020617;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 2px solid rgba(99, 102, 241, 0.3);
+}
+
+.gt-call-screenshare-stage video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain; /* Never crop screen text/code */
+  background: #000;
+}
+
+/* Floating Picture-in-Picture webcam */
+.gt-pip-video-container {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  width: 180px;
+  height: 120px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 2px solid rgba(99, 102, 241, 0.6);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.8);
+  background: #090d16;
+  z-index: 10;
+  transition: all 0.2s;
+}
+
+.gt-pip-video-container:hover {
+  transform: scale(1.05);
+  border-color: #818cf8;
+}
+
+.gt-pip-video-container video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Nametag Overlay Pill */
+.gt-video-nametag {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #f1f5f9;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+}
+
+/* Screen share indicator banner */
+.gt-screen-indicator-banner {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(30, 41, 59, 0.9);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(99, 102, 241, 0.4);
+  color: #e0e7ff;
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 9999px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  z-index: 5;
+}
+
+/* Call Control Footer */
+.gt-call-footer {
+  padding: 14px 20px;
+  background: rgba(30, 41, 59, 0.6);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+}
+
+.gt-call-btn {
+  border: none;
+  border-radius: 12px;
+  padding: 10px 18px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  color: #ffffff;
+}
+
+.gt-call-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+}
+
+.gt-call-btn:active {
+  transform: translateY(0);
+}
+
+/* Control Button Variants */
+.gt-btn-control-active {
+  background: rgba(255, 255, 255, 0.1);
+  color: #f1f5f9;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.gt-btn-control-active:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.gt-btn-control-off {
+  background: rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+.gt-btn-control-off:hover {
+  background: rgba(239, 68, 68, 0.35);
+}
+
+.gt-btn-screenshare {
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.35);
+}
+
+.gt-btn-screenshare:hover {
+  background: rgba(59, 130, 246, 0.25);
+  border-color: #60a5fa;
+}
+
+.gt-btn-screenshare.active {
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: #ffffff;
+  border: 1px solid #10b981;
+  box-shadow: 0 0 15px rgba(16, 185, 129, 0.4);
+}
+
+.gt-btn-endcall {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  color: #ffffff;
+}
+
+.gt-btn-endcall:hover {
+  background: linear-gradient(135deg, #dc2626, #b91c1c);
+  box-shadow: 0 6px 18px rgba(239, 68, 68, 0.4);
+}
