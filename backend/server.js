@@ -241,6 +241,7 @@ io.on("connection", (socket) => {
   // ===== VOICE / VIDEO CALL POPUP =====
   socket.on("callUser", ({ targetId, callerName }) => {
     const room = getRoom(socket.roomCode);
+    console.log(`[Call] ${socket.id} (${callerName}) calling ${targetId}`);
     io.to(targetId).emit("receiveCall", {
       callerId: socket.id,
       callerName:
@@ -252,10 +253,12 @@ io.on("connection", (socket) => {
 
   // WebRTC signaling relay
   socket.on("offer", ({ to, offer }) => {
+    console.log(`[WebRTC 1-1] Offer from ${socket.id} -> ${to}`);
     io.to(to).emit("offer", { from: socket.id, offer });
   });
 
   socket.on("answer", ({ to, answer }) => {
+    console.log(`[WebRTC 1-1] Answer from ${socket.id} -> ${to}`);
     io.to(to).emit("answer", { from: socket.id, answer });
   });
 
@@ -264,10 +267,12 @@ io.on("connection", (socket) => {
   });
 
   socket.on("acceptCall", ({ to }) => {
+    console.log(`[Call] ${socket.id} accepted call from ${to}`);
     io.to(to).emit("acceptCall", { from: socket.id });
   });
 
   socket.on("endCall", ({ to }) => {
+    console.log(`[Call] Call ended by ${socket.id}`);
     if (to) {
       io.to(to).emit("endCall");
     } else {
@@ -285,6 +290,9 @@ io.on("connection", (socket) => {
   socket.on("joinMeetingRoom", () => {
     const room = getRoom(socket.roomCode);
     room.meetingRoomParticipants.add(socket.id);
+    console.log(
+      `[Conference] User ${socket.id} joined conference in room "${socket.roomCode}". Total in conf: ${room.meetingRoomParticipants.size}`
+    );
 
     socket.to(socket.roomCode).emit("meeting-user-joined", { userId: socket.id });
 
@@ -298,15 +306,20 @@ io.on("connection", (socket) => {
   socket.on("leaveMeetingRoom", () => {
     const room = getRoom(socket.roomCode);
     room.meetingRoomParticipants.delete(socket.id);
+    console.log(
+      `[Conference] User ${socket.id} left conference in room "${socket.roomCode}". Total in conf: ${room.meetingRoomParticipants.size}`
+    );
     io.to(socket.roomCode).emit("meeting-user-left", { userId: socket.id });
     io.to(socket.roomCode).emit("meeting-screen-status", { from: socket.id, isSharing: false });
   });
 
   socket.on("meeting-offer", ({ to, offer }) => {
+    console.log(`[Conference] Offer from ${socket.id} -> ${to}`);
     io.to(to).emit("meeting-offer", { from: socket.id, offer });
   });
 
   socket.on("meeting-answer", ({ to, answer }) => {
+    console.log(`[Conference] Answer from ${socket.id} -> ${to}`);
     io.to(to).emit("meeting-answer", { from: socket.id, answer });
   });
 
