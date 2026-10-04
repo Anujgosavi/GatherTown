@@ -17,6 +17,9 @@ import {
   Minimize2,
   PhoneOff,
   GripHorizontal,
+  Users,
+  LogOut,
+  Minus,
 } from "lucide-react";
 import "./VideoCall.css";
 import axios from "axios";
@@ -74,10 +77,16 @@ const Canvas = ({
   const [toastProgress, setToastProgress] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
-  const [meetingMuteStates, setMeetingMuteStates] = useState({}); // { userId: boolean }
   const [meetingNameMap, setMeetingNameMap] = useState({}); // { userId: name }
   // Add intro modal state
   const [showIntroModal, setShowIntroModal] = useState(true);
+
+  // Conference Room (Zone 2) Window states
+  const [isMeetingMaximized, setIsMeetingMaximized] = useState(false);
+  const [isMeetingMinimized, setIsMeetingMinimized] = useState(false);
+  const [meetingPosition, setMeetingPosition] = useState({ x: 0, y: 0 });
+  const isMeetingDraggingRef = useRef(false);
+  const meetingDragStartRef = useRef({ x: 0, y: 0 });
 
   const {
     player,
@@ -101,7 +110,49 @@ const Canvas = ({
     isInArea2,
     meetingRoomCall,
     setMeetingRoomCall,
+    isMeetingScreenSharing,
+    isMeetingMuted,
+    isMeetingVideoOff,
+    meetingPresenter,
+    meetingParticipantMutes,
+    meetingParticipantVideoOff,
+    startMeetingScreenShare,
+    stopMeetingScreenShare,
+    toggleMeetingMic,
+    toggleMeetingVideo,
+    exitMeetingRoom,
+    meetingScreenStreamRef,
   } = useGame(canvasRef, socketRef, keysRef);
+
+  const handleMeetingDragMouseDown = (e) => {
+    if (isMeetingMaximized || isMeetingMinimized) return;
+    isMeetingDraggingRef.current = true;
+    meetingDragStartRef.current = {
+      x: e.clientX - meetingPosition.x,
+      y: e.clientY - meetingPosition.y,
+    };
+  };
+
+  const handleMeetingMouseMove = useCallback((e) => {
+    if (!isMeetingDraggingRef.current) return;
+    setMeetingPosition({
+      x: e.clientX - meetingDragStartRef.current.x,
+      y: e.clientY - meetingDragStartRef.current.y,
+    });
+  }, []);
+
+  const handleMeetingMouseUp = useCallback(() => {
+    isMeetingDraggingRef.current = false;
+  }, []);
+
+  useEffect(() => {
+    window.addEventListener("mousemove", handleMeetingMouseMove);
+    window.addEventListener("mouseup", handleMeetingMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMeetingMouseMove);
+      window.removeEventListener("mouseup", handleMeetingMouseUp);
+    };
+  }, [handleMeetingMouseMove, handleMeetingMouseUp]);
 
   // Initialize canvas and socket
   const SOCKET_URL =
@@ -1794,122 +1845,446 @@ const Canvas = ({
           </div>
         </div>
       )}
-      {/* Meeting Room Video Conference */}
+      {/* Meeting Room Video Conference Window */}
       {meetingRoomCall.active && (
         <div
-          style={{
-            position: "fixed",
-            right: "20px",
-            top: "20px",
-            width: "340px",
-            backgroundColor: "rgba(0, 0, 0, 0.88)",
-            borderRadius: "12px",
-            padding: "16px 12px 12px 12px",
-            zIndex: 1000,
-            boxShadow: "0 4px 24px #000a",
-          }}
+          className={`gt-conf-modal-overlay ${
+            isMeetingMaximized ? "maximized" : ""
+          } ${isMeetingMinimized ? "minimized" : ""}`}
         >
-          <h3
-            style={{
-              color: "white",
-              margin: "0 0 10px 0",
-              fontSize: 20,
-              letterSpacing: 1,
-            }}
-          >
-            Meeting Room
-          </h3>
-          {/* Local video */}
-          <div style={{ position: "relative", marginBottom: "12px" }}>
-            <video
-              autoPlay
-              muted
-              playsInline
-              style={{
-                width: "100%",
-                borderRadius: "7px",
-                marginBottom: "2px",
-                background: "#222",
-                border: "2px solid #4a6cf7",
-                objectFit: "cover",
-              }}
-              ref={(el) => {
-                if (el && meetingRoomCall.localStream) {
-                  el.srcObject = meetingRoomCall.localStream;
-                }
-              }}
-            />
-            <div
-              style={{
-                position: "absolute",
-                left: 8,
-                bottom: 8,
-                background: "rgba(0,0,0,0.7)",
-                color: "#fff",
-                borderRadius: 6,
-                padding: "2px 10px",
-                fontSize: 13,
-                fontWeight: "bold",
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                pointerEvents: "auto",
-              }}
-            >
-              {meetingNameMap[socketRef.current?.id] || playerName || "You"}
-            </div>
-          </div>
-          {/* Remote videos */}
-          {meetingRoomCall.remoteStreams &&
-            Object.entries(meetingRoomCall.remoteStreams).map(
-              ([userId, stream]) => (
-                <div
-                  key={userId + (stream ? stream.id : "")}
-                  style={{ position: "relative", marginBottom: "12px" }}
+          {isMeetingMinimized ? (
+            /* Minimized Floating Picture-in-Picture Dock */
+            <div className="gt-conf-mini-dock">
+              <div className="gt-conf-mini-info">
+                <div className="gt-conf-status-dot" />
+                <span className="gt-conf-mini-title">Conference Room</span>
+                <span className="gt-conf-mini-count">
+                  👥 {1 + Object.keys(meetingRoomCall.remoteStreams || {}).length}
+                </span>
+              </div>
+              <div className="gt-conf-mini-actions">
+                <button
+                  type="button"
+                  className="gt-conf-mini-btn"
+                  onClick={() => setIsMeetingMinimized(false)}
+                  title="Expand Conference Window"
                 >
-                  <video
-                    autoPlay
-                    playsInline
-                    style={{
-                      width: "100%",
-                      borderRadius: "7px",
-                      marginBottom: "2px",
-                      background: "#222",
-                      border: "2px solid #4a6cf7",
-                      objectFit: "cover",
-                    }}
-                    ref={(el) => {
-                      if (el && stream) {
-                        el.srcObject = stream;
-                        el.muted = false;
-                      }
-                    }}
-                  />
-                  <div
-                    style={{
-                      position: "absolute",
-                      left: 8,
-                      bottom: 8,
-                      background: "rgba(0,0,0,0.7)",
-                      color: "#fff",
-                      borderRadius: 6,
-                      padding: "2px 10px",
-                      fontSize: 13,
-                      fontWeight: "bold",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                      pointerEvents: "auto",
-                    }}
+                  <Maximize2 size={15} />
+                </button>
+                <button
+                  type="button"
+                  className="gt-conf-mini-btn danger"
+                  onClick={exitMeetingRoom}
+                  title="Leave Conference"
+                >
+                  <LogOut size={15} />
+                </button>
+              </div>
+            </div>
+          ) : (
+            /* Full Conference Window (Standard / Maximized) */
+            <div
+              className={`gt-conf-window ${
+                isMeetingMaximized ? "maximized" : "standard"
+              }`}
+              style={
+                isMeetingMaximized
+                  ? {}
+                  : {
+                      transform: `translate(${meetingPosition.x}px, ${meetingPosition.y}px)`,
+                    }
+              }
+            >
+              {/* Header */}
+              <div
+                className="gt-conf-header"
+                onMouseDown={handleMeetingDragMouseDown}
+                title={
+                  isMeetingMaximized
+                    ? "Conference Room (Maximized)"
+                    : "Drag to reposition Conference Window"
+                }
+              >
+                <div className="gt-conf-title-area">
+                  {!isMeetingMaximized && (
+                    <div className="gt-conf-drag-icon">
+                      <GripHorizontal size={18} />
+                    </div>
+                  )}
+                  <div className="gt-conf-status-dot" />
+                  <span className="gt-conf-title">Conference Room • Zone 2</span>
+                  <span className="gt-conf-count-badge">
+                    <Users size={13} />
+                    {1 + Object.keys(meetingRoomCall.remoteStreams || {}).length}{" "}
+                    in meeting
+                  </span>
+                  {(isMeetingScreenSharing || meetingPresenter?.isSharing) && (
+                    <span className="gt-conf-presenter-badge">
+                      <Monitor size={13} />
+                      {isMeetingScreenSharing
+                        ? "You are sharing screen"
+                        : `${
+                            meetingPresenter?.presenterName || "Someone"
+                          } is presenting`}
+                    </span>
+                  )}
+                </div>
+
+                <div className="gt-conf-header-actions">
+                  <button
+                    type="button"
+                    className="gt-header-btn"
+                    onClick={() => setIsMeetingMinimized(true)}
+                    title="Minimize to Corner Mini Player"
                   >
-                    {/* Show actual player name if available */}
-                    {meetingNameMap[userId] ||
-                      otherPlayers[userId]?.name ||
-                      `User ${userId.slice(-4)}`}
+                    <Minus size={16} />
+                  </button>
+                  <button
+                    type="button"
+                    className="gt-header-btn"
+                    onClick={() => setIsMeetingMaximized((prev) => !prev)}
+                    title={
+                      isMeetingMaximized
+                        ? "Restore Standard Window"
+                        : "Maximize Fullscreen"
+                    }
+                  >
+                    {isMeetingMaximized ? (
+                      <Minimize2 size={16} />
+                    ) : (
+                      <Maximize2 size={16} />
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Stage Body */}
+              {isMeetingScreenSharing || meetingPresenter?.isSharing ? (
+                /* PRESENTATION STAGE MODE */
+                <div className="gt-conf-presentation-container">
+                  {/* Hero Screen Display */}
+                  <div className="gt-conf-hero-stage">
+                    <div className="gt-conf-hero-banner">
+                      <Monitor size={14} />
+                      {isMeetingScreenSharing
+                        ? "You are presenting your screen"
+                        : `${
+                            meetingPresenter?.presenterName || "Participant"
+                          }'s Screen`}
+                    </div>
+                    {isMeetingScreenSharing ? (
+                      <video
+                        ref={(el) => {
+                          if (
+                            el &&
+                            meetingScreenStreamRef.current &&
+                            el.srcObject !== meetingScreenStreamRef.current
+                          ) {
+                            el.srcObject = meetingScreenStreamRef.current;
+                          }
+                        }}
+                        autoPlay
+                        playsInline
+                        muted
+                        className="gt-conf-screen-video"
+                      />
+                    ) : (
+                      <video
+                        ref={(el) => {
+                          const presenterStream =
+                            meetingPresenter?.presenterId &&
+                            meetingRoomCall.remoteStreams[
+                              meetingPresenter.presenterId
+                            ];
+                          if (
+                            el &&
+                            presenterStream &&
+                            el.srcObject !== presenterStream
+                          ) {
+                            el.srcObject = presenterStream;
+                          }
+                        }}
+                        autoPlay
+                        playsInline
+                        className="gt-conf-screen-video"
+                      />
+                    )}
+                  </div>
+
+                  {/* Bottom Filmstrip of Participants */}
+                  <div className="gt-conf-filmstrip">
+                    {/* Local Participant Tile */}
+                    <div className="gt-conf-filmstrip-tile">
+                      {isMeetingVideoOff ? (
+                        <div className="gt-conf-avatar-tile">
+                          <div className="gt-conf-avatar-circle">
+                            {(playerName || "U").charAt(0).toUpperCase()}
+                          </div>
+                        </div>
+                      ) : (
+                        <video
+                          ref={(el) => {
+                            if (
+                              el &&
+                              meetingRoomCall.localStream &&
+                              el.srcObject !== meetingRoomCall.localStream
+                            ) {
+                              el.srcObject = meetingRoomCall.localStream;
+                            }
+                          }}
+                          autoPlay
+                          playsInline
+                          muted
+                          className="gt-conf-filmstrip-video"
+                        />
+                      )}
+                      <div className="gt-conf-tile-name">
+                        {playerName || "You"} (You)
+                      </div>
+                      {isMeetingMuted && (
+                        <div className="gt-conf-tile-muted-badge">
+                          <MicOff size={11} />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Remote Participant Tiles */}
+                    {Object.entries(meetingRoomCall.remoteStreams || {}).map(
+                      ([userId, stream]) => {
+                        const rName =
+                          meetingNameMap[userId] ||
+                          otherPlayers[userId]?.name ||
+                          `User ${userId.slice(-4)}`;
+                        const isPeerMuted = meetingParticipantMutes[userId];
+                        const isPeerVideoOff =
+                          meetingParticipantVideoOff[userId];
+                        return (
+                          <div key={userId} className="gt-conf-filmstrip-tile">
+                            {isPeerVideoOff ? (
+                              <div className="gt-conf-avatar-tile">
+                                <div className="gt-conf-avatar-circle">
+                                  {rName.charAt(0).toUpperCase()}
+                                </div>
+                              </div>
+                            ) : (
+                              <video
+                                ref={(el) => {
+                                  if (el && stream && el.srcObject !== stream) {
+                                    el.srcObject = stream;
+                                  }
+                                }}
+                                autoPlay
+                                playsInline
+                                className="gt-conf-filmstrip-video"
+                              />
+                            )}
+                            <div className="gt-conf-tile-name">{rName}</div>
+                            {isPeerMuted && (
+                              <div className="gt-conf-tile-muted-badge">
+                                <MicOff size={11} />
+                              </div>
+                            )}
+                          </div>
+                        );
+                      }
+                    )}
                   </div>
                 </div>
-              )
-            )}
+              ) : (
+                /* NORMAL MULTI-USER GRID MODE */
+                <div
+                  className={`gt-conf-grid gt-conf-grid-${
+                    1 +
+                      Object.keys(meetingRoomCall.remoteStreams || {}).length <=
+                    1
+                      ? "1"
+                      : 1 +
+                          Object.keys(meetingRoomCall.remoteStreams || {})
+                            .length ===
+                        2
+                      ? "2"
+                      : 1 +
+                          Object.keys(meetingRoomCall.remoteStreams || {})
+                            .length <=
+                        4
+                      ? "4"
+                      : "many"
+                  }`}
+                >
+                  {/* Local User Card */}
+                  <div className="gt-conf-tile">
+                    {isMeetingVideoOff ? (
+                      <div className="gt-conf-avatar-tile">
+                        <div className="gt-conf-avatar-circle large">
+                          {(playerName || "U").charAt(0).toUpperCase()}
+                        </div>
+                        <span className="gt-conf-avatar-status">
+                          Camera Off
+                        </span>
+                      </div>
+                    ) : (
+                      <video
+                        ref={(el) => {
+                          if (
+                            el &&
+                            meetingRoomCall.localStream &&
+                            el.srcObject !== meetingRoomCall.localStream
+                          ) {
+                            el.srcObject = meetingRoomCall.localStream;
+                          }
+                        }}
+                        autoPlay
+                        playsInline
+                        muted
+                        className="gt-conf-tile-video"
+                      />
+                    )}
+                    <div className="gt-conf-tile-name">
+                      {playerName || "You"} (You)
+                    </div>
+                    {isMeetingMuted && (
+                      <div className="gt-conf-tile-muted-badge">
+                        <MicOff size={13} />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Remote Users Cards */}
+                  {Object.entries(meetingRoomCall.remoteStreams || {}).map(
+                    ([userId, stream]) => {
+                      const rName =
+                        meetingNameMap[userId] ||
+                        otherPlayers[userId]?.name ||
+                        `User ${userId.slice(-4)}`;
+                      const isPeerMuted = meetingParticipantMutes[userId];
+                      const isPeerVideoOff =
+                        meetingParticipantVideoOff[userId];
+                      return (
+                        <div key={userId} className="gt-conf-tile">
+                          {isPeerVideoOff ? (
+                            <div className="gt-conf-avatar-tile">
+                              <div className="gt-conf-avatar-circle large">
+                                {rName.charAt(0).toUpperCase()}
+                              </div>
+                              <span className="gt-conf-avatar-status">
+                                Camera Off
+                              </span>
+                            </div>
+                          ) : (
+                            <video
+                              ref={(el) => {
+                                if (el && stream && el.srcObject !== stream) {
+                                  el.srcObject = stream;
+                                }
+                              }}
+                              autoPlay
+                              playsInline
+                              className="gt-conf-tile-video"
+                            />
+                          )}
+                          <div className="gt-conf-tile-name">{rName}</div>
+                          {isPeerMuted && (
+                            <div className="gt-conf-tile-muted-badge">
+                              <MicOff size={13} />
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
+                  )}
+                </div>
+              )}
+
+              {/* Bottom Toolbar Controls */}
+              <div className="gt-conf-toolbar">
+                <button
+                  type="button"
+                  className={`gt-toolbar-btn ${isMeetingMuted ? "off" : ""}`}
+                  onClick={toggleMeetingMic}
+                  title={isMeetingMuted ? "Unmute Microphone" : "Mute Microphone"}
+                >
+                  {isMeetingMuted ? <MicOff size={18} /> : <Mic size={18} />}
+                  <span className="gt-toolbar-label">
+                    {isMeetingMuted ? "Unmute" : "Mute"}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  className={`gt-toolbar-btn ${
+                    isMeetingVideoOff ? "off" : ""
+                  }`}
+                  onClick={toggleMeetingVideo}
+                  title={
+                    isMeetingVideoOff ? "Turn On Camera" : "Turn Off Camera"
+                  }
+                >
+                  {isMeetingVideoOff ? (
+                    <VideoOff size={18} />
+                  ) : (
+                    <Video size={18} />
+                  )}
+                  <span className="gt-toolbar-label">
+                    {isMeetingVideoOff ? "Start Video" : "Stop Video"}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  className={`gt-toolbar-btn ${
+                    isMeetingScreenSharing ? "sharing" : ""
+                  }`}
+                  onClick={
+                    isMeetingScreenSharing
+                      ? stopMeetingScreenShare
+                      : startMeetingScreenShare
+                  }
+                  title={
+                    isMeetingScreenSharing
+                      ? "Stop Sharing Screen"
+                      : "Share Your Screen"
+                  }
+                >
+                  {isMeetingScreenSharing ? (
+                    <MonitorOff size={18} />
+                  ) : (
+                    <Monitor size={18} />
+                  )}
+                  <span className="gt-toolbar-label">
+                    {isMeetingScreenSharing ? "Stop Share" : "Share Screen"}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  className="gt-toolbar-btn"
+                  onClick={() => setIsMeetingMaximized((prev) => !prev)}
+                  title={
+                    isMeetingMaximized ? "Exit Fullscreen" : "Maximize Window"
+                  }
+                >
+                  {isMeetingMaximized ? (
+                    <Minimize2 size={18} />
+                  ) : (
+                    <Maximize2 size={18} />
+                  )}
+                  <span className="gt-toolbar-label">
+                    {isMeetingMaximized ? "Restore" : "Maximize"}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  className="gt-toolbar-btn end-call"
+                  onClick={exitMeetingRoom}
+                  title="Leave Conference Room & Exit to Hallway"
+                >
+                  <PhoneOff size={18} />
+                  <span className="gt-toolbar-label">Exit Room</span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
       {showChat && (

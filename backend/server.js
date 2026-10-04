@@ -292,6 +292,7 @@ io.on("connection", (socket) => {
     const room = getRoom(socket.roomCode);
     room.meetingRoomParticipants.delete(socket.id);
     io.to(socket.roomCode).emit("meeting-user-left", { userId: socket.id });
+    io.to(socket.roomCode).emit("meeting-screen-status", { from: socket.id, isSharing: false });
   });
 
   socket.on("meeting-offer", ({ to, offer }) => {
@@ -304,6 +305,28 @@ io.on("connection", (socket) => {
 
   socket.on("meeting-ice-candidate", ({ to, candidate }) => {
     io.to(to).emit("meeting-ice-candidate", { from: socket.id, candidate });
+  });
+
+  socket.on("meeting-screen-status", ({ isSharing, presenterName }) => {
+    socket.to(socket.roomCode).emit("meeting-screen-status", {
+      from: socket.id,
+      presenterName: presenterName || "Participant",
+      isSharing,
+    });
+  });
+
+  socket.on("meeting-media-status", ({ isMuted, isVideoOff }) => {
+    socket.to(socket.roomCode).emit("meeting-media-status", {
+      from: socket.id,
+      isMuted,
+      isVideoOff,
+    });
+  });
+
+  socket.on("announceMeetingName", ({ name }) => {
+    socket.to(socket.roomCode).emit("meeting-names", {
+      [socket.id]: name,
+    });
   });
 
   // ===== DISCONNECT CLEANUP =====
@@ -331,6 +354,7 @@ io.on("connection", (socket) => {
     if (room.meetingRoomParticipants.has(socket.id)) {
       room.meetingRoomParticipants.delete(socket.id);
       io.to(socket.roomCode).emit("meeting-user-left", { userId: socket.id });
+      io.to(socket.roomCode).emit("meeting-screen-status", { from: socket.id, isSharing: false });
     }
     io.to(socket.roomCode).emit("participantLeft", { id: socket.id });
   });
