@@ -35,6 +35,13 @@ if (!fs.existsSync(uploadDir)) {
 
 const app = express();
 app.use(cors());
+
+// Normalize duplicate slashes in incoming request URLs (e.g. //api/rooms -> /api/rooms)
+app.use((req, res, next) => {
+  req.url = req.url.replace(/\/{2,}/g, "/");
+  next();
+});
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static("uploads")); // Serve static files from uploads directory

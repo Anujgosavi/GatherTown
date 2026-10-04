@@ -3,8 +3,9 @@ import "./chat.css";
 import axios from "axios";
 import { Paperclip } from "lucide-react";
 
-const BACKEND_URL =
-  process.env.REACT_APP_BACKEND_URL || "http://localhost:3001";
+const BACKEND_URL = (
+  process.env.REACT_APP_BACKEND_URL || "http://localhost:3001"
+).replace(/\/+$/, "");
 
 function Chat({ username, socket, chatTargetId }) {
   const [message, setMessage] = useState("");

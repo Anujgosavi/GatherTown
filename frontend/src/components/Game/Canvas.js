@@ -149,8 +149,9 @@ const Canvas = ({
   }, [handleMeetingMouseMove, handleMeetingMouseUp]);
 
   // Initialize canvas and socket
-  const SOCKET_URL =
-    process.env.REACT_APP_BACKEND_URL || "http://localhost:3001";
+  const SOCKET_URL = (
+    process.env.REACT_APP_BACKEND_URL || "http://localhost:3001"
+  ).replace(/\/+$/, "");
 
   useEffect(() => {
     if (initialPlayerName) {

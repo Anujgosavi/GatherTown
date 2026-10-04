@@ -111,8 +111,9 @@ const useGame = (canvasRef, socketRef, keysRef) => {
   useEffect(() => {
     const fetchIceServers = async () => {
       try {
-        const backendUrl =
-          process.env.REACT_APP_BACKEND_URL || "http://localhost:3001";
+        const backendUrl = (
+          process.env.REACT_APP_BACKEND_URL || "http://localhost:3001"
+        ).replace(/\/+$/, "");
         const res = await axios.get(`${backendUrl}/api/ice-token`);
         setIceConfig(res.data); // expects { iceServers: [...] }
       } catch (err) {
