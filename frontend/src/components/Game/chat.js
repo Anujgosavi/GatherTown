@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import "./chat.css";
 import axios from "axios";
 import { Paperclip } from "lucide-react";
@@ -8,7 +8,6 @@ const BACKEND_URL =
 
 function Chat({ username, socket, chatTargetId }) {
   const [message, setMessage] = useState("");
-  const [onlineUsers, setOnlineuser] = useState([]);
   const [listner, setListner] = useState("");
   const [allchat, setAllchat] = useState([]);
   const [userMap, setUserMap] = useState({});

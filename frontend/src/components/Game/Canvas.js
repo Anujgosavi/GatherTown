@@ -1,5 +1,4 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
-import collisions from "../../utils/collisions";
 import Sprite from "./Sprite";
 import io from "socket.io-client";
 import "./styles.css";
@@ -74,7 +73,6 @@ const Canvas = ({
   const [iceConfig, setIceConfig] = useState(null);
   const iceCandidateQueue = useRef({}); // { peerId: [candidates] }
   const [toast, setToast] = useState(null);
-  const [toastProgress, setToastProgress] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [meetingNameMap, setMeetingNameMap] = useState({}); // { userId: name }
@@ -92,13 +90,11 @@ const Canvas = ({
     player,
     setPlayer,
     otherPlayers,
-    setOtherPlayers,
     boundaries,
     interactionMenu,
     playerName,
     setPlayerName,
     playerCount,
-    setPlayerCount,
     gameContainerRef,
     checkCollision,
     findValidSpawnPosition,
@@ -107,9 +103,7 @@ const Canvas = ({
     mapImage,
     backgroundImage,
     playerImages,
-    isInArea2,
     meetingRoomCall,
-    setMeetingRoomCall,
     isMeetingScreenSharing,
     isMeetingMuted,
     isMeetingVideoOff,
@@ -185,7 +179,7 @@ const Canvas = ({
       socket.disconnect();
       cancelAnimationFrame(animationFrameRef.current);
     };
-  }, [roomCode, initialPlayerName, userAvatar, SOCKET_URL]);
+  }, [roomCode, initialPlayerName, tempPlayerName, userAvatar, SOCKET_URL]);
 
   // Fetch ICE servers from backend on mount
   useEffect(() => {
@@ -282,11 +276,7 @@ const Canvas = ({
       interactionMenu.current.handleMouseMove(mouseX, mouseY);
     };
 
-    const handleClick = (e) => {
-      const rect = canvas.getBoundingClientRect();
-      const mouseX = e.clientX - rect.left;
-      const mouseY = e.clientY - rect.top;
-
+    const handleClick = () => {
       interactionMenu.current.handleClick(otherPlayers);
     };
 
@@ -297,7 +287,7 @@ const Canvas = ({
       canvas.removeEventListener("mousemove", handleMouseMove);
       canvas.removeEventListener("click", handleClick);
     };
-  }, [otherPlayers]);
+  }, [otherPlayers, interactionMenu]);
 
   // Listen for incoming call popup
   useEffect(() => {
@@ -313,18 +303,17 @@ const Canvas = ({
 
   // Patch interaction menu to trigger call
   useEffect(() => {
-    if (!interactionMenu.current) return;
-    const originalHandleClick = interactionMenu.current.handleClick.bind(
-      interactionMenu.current
-    );
-    interactionMenu.current.handleClick = (otherPlayers) => {
+    const currentMenu = interactionMenu.current;
+    if (!currentMenu) return;
+    const originalHandleClick = currentMenu.handleClick.bind(currentMenu);
+    currentMenu.handleClick = (otherPlayers) => {
       if (
-        interactionMenu.current.visible &&
-        interactionMenu.current.selectedOption === "voiceChat" &&
-        interactionMenu.current.targetId
+        currentMenu.visible &&
+        currentMenu.selectedOption === "voiceChat" &&
+        currentMenu.targetId
       ) {
         // Voice chat logic (already working)
-        const targetId = interactionMenu.current.targetId;
+        const targetId = currentMenu.targetId;
         const targetName = otherPlayers[targetId]?.name || "Colleague";
         callPeerIdRef.current = targetId;
         setCallPeerId(targetId);
@@ -336,25 +325,72 @@ const Canvas = ({
             callerName: playerName,
           });
         }
-        interactionMenu.current.hide();
+        currentMenu.hide();
         return true;
       }
       // --- Add this for chat option ---
       if (
-        interactionMenu.current.visible &&
-        interactionMenu.current.selectedOption === "chat" &&
-        interactionMenu.current.targetId
+        currentMenu.visible &&
+        currentMenu.selectedOption === "chat" &&
+        currentMenu.targetId
       ) {
-        openChatWithUser(interactionMenu.current.targetId);
-        interactionMenu.current.hide();
+        openChatWithUser(currentMenu.targetId);
+        currentMenu.hide();
         return true;
       }
       return originalHandleClick(otherPlayers);
     };
     return () => {
-      interactionMenu.current.handleClick = originalHandleClick;
+      if (currentMenu) {
+        currentMenu.handleClick = originalHandleClick;
+      }
     };
   }, [interactionMenu, playerName]);
+
+  // Cleanup on call end
+  const handleEndCall = useCallback(() => {
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach((track) => track.stop());
+      screenStreamRef.current = null;
+    }
+    setIsScreenSharing(false);
+    setIsRemoteScreenSharing(false);
+    setIsCallMaximized(false);
+    setIsPipMinimized(false);
+    setCallPosition({ x: 0, y: 0 });
+    setCallPeerName("");
+    cameraVideoTrackRef.current = null;
+
+    if (audioContextRef.current) {
+      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current = null;
+    }
+    micAudioTrackRef.current = null;
+
+    setVideoCall({ active: false, localStream: null, remoteStream: null });
+    const targetPeer = callPeerIdRef.current || callPeerId;
+    callPeerIdRef.current = null;
+    setCallPeerId(null);
+
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.close();
+      peerConnectionRef.current = null;
+    }
+    if (localVideoRef.current && localVideoRef.current.srcObject) {
+      localVideoRef.current.srcObject
+        .getTracks()
+        .forEach((track) => track.stop());
+    }
+    if (remoteVideoRef.current && remoteVideoRef.current.srcObject) {
+      remoteVideoRef.current.srcObject
+        .getTracks()
+        .forEach((track) => track.stop());
+    }
+    if (socketRef.current && targetPeer) {
+      socketRef.current.emit("endCall", { to: targetPeer });
+    }
+    setToast("Call ended");
+  }, [callPeerId]);
 
   // Accept incoming call
   const handleAcceptCall = async () => {
@@ -593,53 +629,7 @@ const Canvas = ({
         pc.close();
       }
     };
-  }, [callPeerId, videoCall.active, iceConfig]);
-
-  // Cleanup on call end
-  const handleEndCall = () => {
-    if (screenStreamRef.current) {
-      screenStreamRef.current.getTracks().forEach((track) => track.stop());
-      screenStreamRef.current = null;
-    }
-    setIsScreenSharing(false);
-    setIsRemoteScreenSharing(false);
-    setIsCallMaximized(false);
-    setIsPipMinimized(false);
-    setCallPosition({ x: 0, y: 0 });
-    setCallPeerName("");
-    cameraVideoTrackRef.current = null;
-
-    if (audioContextRef.current) {
-      audioContextRef.current.close().catch(() => {});
-      audioContextRef.current = null;
-    }
-    micAudioTrackRef.current = null;
-
-    setVideoCall({ active: false, localStream: null, remoteStream: null });
-    const targetPeer = callPeerIdRef.current || callPeerId;
-    callPeerIdRef.current = null;
-    setCallPeerId(null);
-
-    if (peerConnectionRef.current) {
-      peerConnectionRef.current.close();
-      peerConnectionRef.current = null;
-    }
-    if (localVideoRef.current && localVideoRef.current.srcObject) {
-      localVideoRef.current.srcObject
-        .getTracks()
-        .forEach((track) => track.stop());
-    }
-    if (remoteVideoRef.current && remoteVideoRef.current.srcObject) {
-      remoteVideoRef.current.srcObject
-        .getTracks()
-        .forEach((track) => track.stop());
-    }
-    if (socketRef.current && targetPeer) {
-      socketRef.current.emit("endCall", { to: targetPeer });
-    }
-    setToast("Call ended");
-    setToastProgress(0);
-  };
+  }, [callPeerId, videoCall.active, iceConfig, handleEndCall]);
 
   // Stop 1-on-1 screen sharing and restore camera
   const stopScreenShare = useCallback(async () => {
@@ -851,7 +841,6 @@ const Canvas = ({
     const duration = 2000;
     const timeout = setTimeout(() => {
       setToast(null);
-      setToastProgress(0);
     }, duration);
     return () => clearTimeout(timeout);
   }, [toast]);
@@ -899,7 +888,7 @@ const Canvas = ({
     const handlePeerEnd = () => handleEndCall();
     socketRef.current.on("endCall", handlePeerEnd);
     return () => socketRef.current.off("endCall", handlePeerEnd);
-  }, [callPeerId]);
+  }, [handleEndCall, socketRef]);
 
   // Listen for player names in meeting room
   useEffect(() => {
@@ -1042,47 +1031,6 @@ const Canvas = ({
       });
     }
   };
-
-  // Track if mouse is hovering over conference room
-  const [hoverConferenceRoom, setHoverConferenceRoom] = useState(false);
-
-  // Helper to check if a pixel position is in conference room (area with 2 in collisions)
-  const isPixelInConferenceRoom = (x, y) => {
-    const gridX = Math.floor(x / 32);
-    const gridY = Math.floor(y / 32);
-    return collisions[gridY]?.[gridX] === 2;
-  };
-
-  // Mouse move handler for conference room hover
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const handleMouseMove = (e) => {
-      const rect = canvas.getBoundingClientRect();
-      const mouseX = e.clientX - rect.left;
-      const mouseY = e.clientY - rect.top;
-      setHoverConferenceRoom(isPixelInConferenceRoom(mouseX, mouseY));
-    };
-
-    const handleMouseLeave = () => setHoverConferenceRoom(false);
-
-    canvas.addEventListener("mousemove", handleMouseMove);
-    canvas.addEventListener("mouseleave", handleMouseLeave);
-
-    return () => {
-      canvas.removeEventListener("mousemove", handleMouseMove);
-      canvas.removeEventListener("mouseleave", handleMouseLeave);
-    };
-  }, [canvasRef]);
-
-  // Helper to check if player is in conference room (area with 2 in collisions)
-  const isPlayerInConferenceRoom = (() => {
-    if (!player) return false;
-    const gridX = Math.floor(player.position.x / 32);
-    const gridY = Math.floor(player.position.y / 32);
-    return collisions[gridY]?.[gridX] === 2;
-  })();
 
   // Add this state to track which user to chat with
   const [chatTargetId, setChatTargetId] = useState(null);

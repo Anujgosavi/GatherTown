@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { Copy, Check, LogOut, User, Home, ArrowLeft } from "lucide-react";
+import { Copy, Check, LogOut, User, ArrowLeft } from "lucide-react";
 import "./Navbar.css";
 
 const Navbar = ({ roomInfo }) => {

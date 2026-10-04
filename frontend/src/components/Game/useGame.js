@@ -597,7 +597,7 @@ const useGame = (canvasRef, socketRef, keysRef) => {
     } catch (error) {
       console.error("Error initializing meeting room call:", error);
     }
-  }, [iceConfig]);
+  }, [iceConfig, socketRef]);
 
   // Stop meeting screen sharing
   const stopMeetingScreenShare = useCallback(async () => {
@@ -650,7 +650,7 @@ const useGame = (canvasRef, socketRef, keysRef) => {
         isSharing: false,
       });
     }
-  }, []);
+  }, [socketRef]);
 
   // Start meeting screen sharing
   const startMeetingScreenShare = useCallback(async () => {
@@ -725,7 +725,7 @@ const useGame = (canvasRef, socketRef, keysRef) => {
         console.error("Meeting Room: Error starting screen share", err);
       }
     }
-  }, [playerName, stopMeetingScreenShare]);
+  }, [playerName, stopMeetingScreenShare, socketRef]);
 
   // Toggle local mic mute in meeting room
   const toggleMeetingMic = useCallback(() => {
@@ -741,7 +741,7 @@ const useGame = (canvasRef, socketRef, keysRef) => {
         });
       }
     }
-  }, [isMeetingVideoOff]);
+  }, [isMeetingVideoOff, socketRef]);
 
   // Toggle local camera on/off in meeting room
   const toggleMeetingVideo = useCallback(() => {
@@ -757,7 +757,7 @@ const useGame = (canvasRef, socketRef, keysRef) => {
         });
       }
     }
-  }, [isMeetingMuted]);
+  }, [isMeetingMuted, socketRef]);
 
   // Clean up meeting room call
   const cleanupMeetingRoom = useCallback(() => {
@@ -794,7 +794,7 @@ const useGame = (canvasRef, socketRef, keysRef) => {
     if (socketRef.current) {
       socketRef.current.emit("leaveMeetingRoom");
     }
-  }, [meetingRoomCall.localStream]);
+  }, [meetingRoomCall.localStream, socketRef]);
 
   // Exit meeting room and teleport player outside to safe hallway coordinates
   const exitMeetingRoom = useCallback(() => {
@@ -822,7 +822,7 @@ const useGame = (canvasRef, socketRef, keysRef) => {
         return prev;
       });
     }
-  }, [cleanupMeetingRoom, player, playerName]);
+  }, [cleanupMeetingRoom, player, playerName, socketRef]);
 
   // Player proximity checks
   const checkNearbyPlayers = useCallback(() => {

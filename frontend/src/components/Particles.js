@@ -6,11 +6,13 @@ const Particles = () => {
     const particlesContainer = document.getElementById('particles');
     const colors = ['#4a6cf7', '#f97b7b', '#02cd82'];
     
-    for (let i = 0; i < 50; i++) {
-      const particle = document.createElement('div');
-      particle.className = 'particle';
-      // ... rest of particle creation logic
-      particlesContainer.appendChild(particle);
+    if (particlesContainer) {
+      for (let i = 0; i < 50; i++) {
+        const particle = document.createElement('div');
+        particle.className = 'particle';
+        particle.style.background = colors[i % colors.length];
+        particlesContainer.appendChild(particle);
+      }
     }
   }, []);
 
