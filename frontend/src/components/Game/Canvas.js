@@ -363,7 +363,7 @@ const Canvas = ({
     cameraVideoTrackRef.current = null;
 
     if (audioContextRef.current) {
-      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current.close().catch(() => { });
       audioContextRef.current = null;
     }
     micAudioTrackRef.current = null;
@@ -657,7 +657,7 @@ const Canvas = ({
 
     // Clean up audio mixing context and restore mic audio track
     if (audioContextRef.current) {
-      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current.close().catch(() => { });
       audioContextRef.current = null;
     }
     if (peerConnectionRef.current && micAudioTrackRef.current) {
@@ -675,7 +675,7 @@ const Canvas = ({
     // Restore local video element if it was showing screen
     if (localVideoRef.current && videoCall.localStream) {
       localVideoRef.current.srcObject = videoCall.localStream;
-      localVideoRef.current.play().catch(() => {});
+      localVideoRef.current.play().catch(() => { });
     }
 
     // Notify peer of stop
@@ -758,7 +758,7 @@ const Canvas = ({
       // Attach stream to local preview
       if (localScreenRef.current) {
         localScreenRef.current.srcObject = stream;
-        localScreenRef.current.play().catch(() => {});
+        localScreenRef.current.play().catch(() => { });
       }
 
       // Notify peer to enter presentation mode
@@ -818,7 +818,7 @@ const Canvas = ({
       // Immediate force playback resumption when status arrives
       setTimeout(() => {
         if (remoteVideoRef.current) {
-          remoteVideoRef.current.play().catch(() => {});
+          remoteVideoRef.current.play().catch(() => { });
         }
       }, 50);
     };
@@ -832,7 +832,7 @@ const Canvas = ({
   useEffect(() => {
     if (isScreenSharing && localScreenRef.current && screenStreamRef.current) {
       localScreenRef.current.srcObject = screenStreamRef.current;
-      localScreenRef.current.play().catch(() => {});
+      localScreenRef.current.play().catch(() => { });
     }
   }, [isScreenSharing]);
 
@@ -852,19 +852,19 @@ const Canvas = ({
       if (localVideoRef.current.srcObject !== videoCall.localStream) {
         localVideoRef.current.srcObject = videoCall.localStream;
       }
-      localVideoRef.current.play().catch(() => {});
+      localVideoRef.current.play().catch(() => { });
     }
     if (remoteVideoRef.current && videoCall.remoteStream) {
       if (remoteVideoRef.current.srcObject !== videoCall.remoteStream) {
         remoteVideoRef.current.srcObject = videoCall.remoteStream;
       }
-      remoteVideoRef.current.play().catch(() => {});
+      remoteVideoRef.current.play().catch(() => { });
 
       // Auto-resume playback on track unmute (triggers when track replacement finishes)
       videoCall.remoteStream.getVideoTracks().forEach((track) => {
         track.onunmute = () => {
           if (remoteVideoRef.current) {
-            remoteVideoRef.current.play().catch(() => {});
+            remoteVideoRef.current.play().catch(() => { });
           }
         };
       });
@@ -874,11 +874,11 @@ const Canvas = ({
     const remoteVideo = remoteVideoRef.current;
 
     if (localVideo) {
-      localVideo.onloadedmetadata = () => localVideo.play().catch(() => {});
+      localVideo.onloadedmetadata = () => localVideo.play().catch(() => { });
       localVideo.onerror = (e) => console.error("Local video error:", e);
     }
     if (remoteVideo) {
-      remoteVideo.onloadedmetadata = () => remoteVideo.play().catch(() => {});
+      remoteVideo.onloadedmetadata = () => remoteVideo.play().catch(() => { });
       remoteVideo.onerror = (e) => console.error("Remote video error:", e);
     }
   }, [videoCall.localStream, videoCall.remoteStream, isScreenSharing, isRemoteScreenSharing]);
@@ -1570,19 +1570,18 @@ const Canvas = ({
           className={`gt-call-modal-overlay ${isCallMaximized ? "maximized" : ""}`}
         >
           <div
-            className={`gt-call-window ${
-              isCallMaximized
+            className={`gt-call-window ${isCallMaximized
                 ? "maximized"
                 : isScreenSharing || isRemoteScreenSharing
-                ? "screenshare-standard"
-                : "standard"
-            }`}
+                  ? "screenshare-standard"
+                  : "standard"
+              }`}
             style={
               isCallMaximized
                 ? {}
                 : {
-                    transform: `translate(${callPosition.x}px, ${callPosition.y}px)`,
-                  }
+                  transform: `translate(${callPosition.x}px, ${callPosition.y}px)`,
+                }
             }
           >
             {/* Draggable Header */}
@@ -1635,17 +1634,15 @@ const Canvas = ({
 
             {/* Video Stage with Persistent Elements (Zero Unmounts, Zero Glitches) */}
             <div
-              className={`gt-call-stage ${
-                isScreenSharing || isRemoteScreenSharing
+              className={`gt-call-stage ${isScreenSharing || isRemoteScreenSharing
                   ? "mode-presentation"
                   : "mode-dual"
-              }`}
+                }`}
             >
               {/* 1. Local Screen Preview Box */}
               <div
-                className={`gt-video-box ${
-                  isScreenSharing ? "gt-box-presentation" : "gt-box-hidden"
-                }`}
+                className={`gt-video-box ${isScreenSharing ? "gt-box-presentation" : "gt-box-hidden"
+                  }`}
               >
                 <div className="gt-screen-indicator-banner">
                   <Monitor size={14} /> You are presenting your screen
@@ -1660,13 +1657,12 @@ const Canvas = ({
 
               {/* 2. Remote Video Box (Peer Webcam OR Peer Screen) */}
               <div
-                className={`gt-video-box ${
-                  isRemoteScreenSharing
+                className={`gt-video-box ${isRemoteScreenSharing
                     ? "gt-box-presentation"
                     : isScreenSharing
-                    ? `gt-box-pip ${isPipMinimized ? "minimized" : ""}`
-                    : ""
-                }`}
+                      ? `gt-box-pip ${isPipMinimized ? "minimized" : ""}`
+                      : ""
+                  }`}
               >
                 {isRemoteScreenSharing && (
                   <div className="gt-screen-indicator-banner">
@@ -1700,13 +1696,12 @@ const Canvas = ({
 
               {/* 3. Local Camera Box */}
               <div
-                className={`gt-video-box ${
-                  isRemoteScreenSharing
+                className={`gt-video-box ${isRemoteScreenSharing
                     ? `gt-box-pip ${isPipMinimized ? "minimized" : ""}`
                     : isScreenSharing
-                    ? "gt-box-hidden"
-                    : ""
-                }`}
+                      ? "gt-box-hidden"
+                      : ""
+                  }`}
               >
                 {isRemoteScreenSharing && (
                   <button
@@ -1738,9 +1733,8 @@ const Canvas = ({
               {/* Mic Toggle */}
               <button
                 type="button"
-                className={`gt-call-btn ${
-                  isMuted ? "gt-btn-control-off" : "gt-btn-control-active"
-                }`}
+                className={`gt-call-btn ${isMuted ? "gt-btn-control-off" : "gt-btn-control-active"
+                  }`}
                 onClick={handleToggleMute}
                 title={isMuted ? "Unmute Microphone" : "Mute Microphone"}
               >
@@ -1751,9 +1745,8 @@ const Canvas = ({
               {/* Camera Toggle */}
               <button
                 type="button"
-                className={`gt-call-btn ${
-                  isVideoOff ? "gt-btn-control-off" : "gt-btn-control-active"
-                }`}
+                className={`gt-call-btn ${isVideoOff ? "gt-btn-control-off" : "gt-btn-control-active"
+                  }`}
                 onClick={handleToggleVideo}
                 title={isVideoOff ? "Turn Video On" : "Turn Video Off"}
               >
@@ -1764,9 +1757,8 @@ const Canvas = ({
               {/* Screen Share Toggle */}
               <button
                 type="button"
-                className={`gt-call-btn gt-btn-screenshare ${
-                  isScreenSharing ? "active" : ""
-                }`}
+                className={`gt-call-btn gt-btn-screenshare ${isScreenSharing ? "active" : ""
+                  }`}
                 onClick={handleToggleScreenShare}
                 title={
                   isScreenSharing ? "Stop Sharing Screen" : "Share Your Screen"
@@ -1797,9 +1789,8 @@ const Canvas = ({
       {/* Meeting Room Video Conference Window */}
       {meetingRoomCall.active && (
         <div
-          className={`gt-conf-modal-overlay ${
-            isMeetingMaximized ? "maximized" : ""
-          } ${isMeetingMinimized ? "minimized" : ""}`}
+          className={`gt-conf-modal-overlay ${isMeetingMaximized ? "maximized" : ""
+            } ${isMeetingMinimized ? "minimized" : ""}`}
         >
           {isMeetingMinimized ? (
             /* Minimized Floating Picture-in-Picture Dock */
@@ -1833,15 +1824,14 @@ const Canvas = ({
           ) : (
             /* Full Conference Window (Standard / Maximized) */
             <div
-              className={`gt-conf-window ${
-                isMeetingMaximized ? "maximized" : "standard"
-              }`}
+              className={`gt-conf-window ${isMeetingMaximized ? "maximized" : "standard"
+                }`}
               style={
                 isMeetingMaximized
                   ? {}
                   : {
-                      transform: `translate(${meetingPosition.x}px, ${meetingPosition.y}px)`,
-                    }
+                    transform: `translate(${meetingPosition.x}px, ${meetingPosition.y}px)`,
+                  }
               }
             >
               {/* Header */}
@@ -1872,9 +1862,8 @@ const Canvas = ({
                       <Monitor size={13} />
                       {isMeetingScreenSharing
                         ? "You are sharing screen"
-                        : `${
-                            meetingPresenter?.presenterName || "Someone"
-                          } is presenting`}
+                        : `${meetingPresenter?.presenterName || "Someone"
+                        } is presenting`}
                     </span>
                   )}
                 </div>
@@ -1917,9 +1906,8 @@ const Canvas = ({
                       <Monitor size={14} />
                       {isMeetingScreenSharing
                         ? "You are presenting your screen"
-                        : `${
-                            meetingPresenter?.presenterName || "Participant"
-                          }'s Screen`}
+                        : `${meetingPresenter?.presenterName || "Participant"
+                        }'s Screen`}
                     </div>
                     {isMeetingScreenSharing ? (
                       <video
@@ -1943,7 +1931,7 @@ const Canvas = ({
                           const presenterStream =
                             meetingPresenter?.presenterId &&
                             meetingRoomCall.remoteStreams[
-                              meetingPresenter.presenterId
+                            meetingPresenter.presenterId
                             ];
                           if (
                             el &&
@@ -2042,23 +2030,22 @@ const Canvas = ({
               ) : (
                 /* NORMAL MULTI-USER GRID MODE */
                 <div
-                  className={`gt-conf-grid gt-conf-grid-${
-                    1 +
+                  className={`gt-conf-grid gt-conf-grid-${1 +
                       Object.keys(meetingRoomCall.remoteStreams || {}).length <=
-                    1
+                      1
                       ? "1"
                       : 1 +
-                          Object.keys(meetingRoomCall.remoteStreams || {})
-                            .length ===
+                        Object.keys(meetingRoomCall.remoteStreams || {})
+                          .length ===
                         2
-                      ? "2"
-                      : 1 +
+                        ? "2"
+                        : 1 +
                           Object.keys(meetingRoomCall.remoteStreams || {})
                             .length <=
-                        4
-                      ? "4"
-                      : "many"
-                  }`}
+                          4
+                          ? "4"
+                          : "many"
+                    }`}
                 >
                   {/* Local User Card */}
                   <div className="gt-conf-tile">
@@ -2160,9 +2147,8 @@ const Canvas = ({
 
                 <button
                   type="button"
-                  className={`gt-toolbar-btn ${
-                    isMeetingVideoOff ? "off" : ""
-                  }`}
+                  className={`gt-toolbar-btn ${isMeetingVideoOff ? "off" : ""
+                    }`}
                   onClick={toggleMeetingVideo}
                   title={
                     isMeetingVideoOff ? "Turn On Camera" : "Turn Off Camera"
@@ -2180,9 +2166,8 @@ const Canvas = ({
 
                 <button
                   type="button"
-                  className={`gt-toolbar-btn ${
-                    isMeetingScreenSharing ? "sharing" : ""
-                  }`}
+                  className={`gt-toolbar-btn ${isMeetingScreenSharing ? "sharing" : ""
+                    }`}
                   onClick={
                     isMeetingScreenSharing
                       ? stopMeetingScreenShare

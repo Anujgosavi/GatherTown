@@ -120,8 +120,8 @@ function Chat({ username, socket, chatTargetId }) {
               <h2 style={{ color: "#2563eb" }}>
                 {listner
                   ? `Chat with: ${Object.keys(userMap).find(
-                      (username) => userMap[username] === listner
-                    )}`
+                    (username) => userMap[username] === listner
+                  )}`
                   : "Select a user to start chatting"}
               </h2>
             </div>
@@ -130,17 +130,15 @@ function Chat({ username, socket, chatTargetId }) {
               {allchat.map(({ sender, message, senderUsername }, idx) => (
                 <div
                   key={`${sender}-${idx}`}
-                  className={`chat-message ${
-                    sender === socket.id ? "right" : "left"
-                  }`}
+                  className={`chat-message ${sender === socket.id ? "right" : "left"
+                    }`}
                 >
                   <div
-                    className={`message-box ${
-                      sender === socket.id ? "sent" : "received"
-                    }`}
+                    className={`message-box ${sender === socket.id ? "sent" : "received"
+                      }`}
                   >
                     {message.startsWith("http://") ||
-                    message.startsWith("https://") ? (
+                      message.startsWith("https://") ? (
                       <a
                         href={message}
                         target="_blank"

@@ -94,11 +94,11 @@ const useGame = (canvasRef, socketRef, keysRef) => {
         .map((cell, j) =>
           cell === 1
             ? {
-                x: j * BOUNDARY_SIZE,
-                y: i * BOUNDARY_SIZE,
-                width: BOUNDARY_SIZE - 5,
-                height: BOUNDARY_SIZE - 10,
-              }
+              x: j * BOUNDARY_SIZE,
+              y: i * BOUNDARY_SIZE,
+              width: BOUNDARY_SIZE - 5,
+              height: BOUNDARY_SIZE - 10,
+            }
             : null
         )
         .filter(Boolean)
@@ -609,7 +609,7 @@ const useGame = (canvasRef, socketRef, keysRef) => {
       meetingScreenStreamRef.current = null;
     }
     if (meetingAudioContextRef.current) {
-      meetingAudioContextRef.current.close().catch(() => {});
+      meetingAudioContextRef.current.close().catch(() => { });
       meetingAudioContextRef.current = null;
     }
 
@@ -769,7 +769,7 @@ const useGame = (canvasRef, socketRef, keysRef) => {
       meetingScreenStreamRef.current = null;
     }
     if (meetingAudioContextRef.current) {
-      meetingAudioContextRef.current.close().catch(() => {});
+      meetingAudioContextRef.current.close().catch(() => { });
       meetingAudioContextRef.current = null;
     }
     if (meetingRoomCall.localStream) {
@@ -898,6 +898,7 @@ const useGame = (canvasRef, socketRef, keysRef) => {
     toggleMeetingVideo,
     exitMeetingRoom,
     meetingScreenStreamRef,
+    iceConfig,
   };
 };
 
