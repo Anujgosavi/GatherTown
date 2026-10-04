@@ -19,28 +19,83 @@ const getFallbackIceServers = () => [
   },
 ];
 
+// Memory cache for active Metered ICE servers
+let cachedMeteredServers = null;
+let cachedMeteredExpiresAt = 0;
+
 router.get("/", async (req, res) => {
   try {
     // 1. Check if Metered credentials are configured
-    const meteredApp = process.env.METERED_APP_NAME;
-    const meteredKey = process.env.METERED_API_KEY;
-    if (meteredApp && meteredKey) {
-      const cleanApp = meteredApp.replace(/^https?:\/\//, "").replace(/\/+$/, "");
+    const meteredDomain =
+      process.env.METERED_DOMAIN ||
+      process.env.METERED_APP_NAME ||
+      "anujg.metered.live";
+    const meteredSecret =
+      process.env.METERED_SECRET_KEY ||
+      process.env.METERED_API_KEY ||
+      "RrUVSAd5teE9q1QI2VzlIl7M8W8nfh8jAHOP-wr9ZctPE3tT";
+
+    if (meteredDomain && meteredSecret) {
+      // Check cache first (valid for 12 hours)
+      const now = Date.now();
+      if (cachedMeteredServers && now < cachedMeteredExpiresAt) {
+        return res.json({ iceServers: cachedMeteredServers });
+      }
+
+      const cleanApp = meteredDomain
+        .replace(/^https?:\/\//, "")
+        .replace(/\/+$/, "");
       const host = cleanApp.includes(".") ? cleanApp : `${cleanApp}.metered.live`;
+
       try {
-        let response = await fetch(`https://${host}/api/v1/turn/credentials?apiKey=${meteredKey}`);
-        if (!response.ok && host.endsWith(".metered.live")) {
-          response = await fetch(`https://${cleanApp}.metered.ca/api/v1/turn/credentials?apiKey=${meteredKey}`);
+        // A) If secretKey is provided, generate fresh credentials via POST
+        const postRes = await fetch(
+          `https://${host}/api/v1/turn/credential?secretKey=${meteredSecret}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ expiryInSeconds: 86400 }),
+          }
+        );
+
+        if (postRes.ok) {
+          const credData = await postRes.json();
+          if (credData.apiKey) {
+            // Retrieve full ICE configuration with the generated apiKey
+            const credsRes = await fetch(
+              `https://${host}/api/v1/turn/credentials?apiKey=${credData.apiKey}`
+            );
+            if (credsRes.ok) {
+              const servers = await credsRes.json();
+              if (Array.isArray(servers) && servers.length > 0) {
+                cachedMeteredServers = servers;
+                cachedMeteredExpiresAt = now + 12 * 60 * 60 * 1000;
+                console.log(
+                  `[ICE] Retrieved and cached ${servers.length} dedicated TURN servers from Metered`
+                );
+                return res.json({ iceServers: servers });
+              }
+            }
+          }
         }
-        if (response.ok) {
-          const iceServers = await response.json();
-          if (Array.isArray(iceServers) && iceServers.length > 0) {
-            console.log(`[ICE] Successfully retrieved ${iceServers.length} TURN servers from Metered`);
-            return res.json({ iceServers });
+
+        // B) Try direct GET with apiKey as fallback
+        const getRes = await fetch(
+          `https://${host}/api/v1/turn/credentials?apiKey=${meteredSecret}`
+        );
+        if (getRes.ok) {
+          const servers = await getRes.json();
+          if (Array.isArray(servers) && servers.length > 0) {
+            cachedMeteredServers = servers;
+            cachedMeteredExpiresAt = now + 12 * 60 * 60 * 1000;
+            console.log(
+              `[ICE] Retrieved and cached ${servers.length} TURN servers from Metered`
+            );
+            return res.json({ iceServers: servers });
           }
         }
       } catch (e) {
-        console.warn("Metered TURN fetch failed, falling back:", e.message);
+        console.warn("Metered TURN fetch error, falling back:", e.message);
       }
     }
 
