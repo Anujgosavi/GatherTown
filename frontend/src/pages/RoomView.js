@@ -64,7 +64,12 @@ const RoomView = () => {
       <Navbar roomInfo={roomInfo} />
       <Particles />
       <div id="gameWrapper" style={{ paddingTop: "60px" }}>
-        <Canvas roomCode={roomCode} initialPlayerName={user?.name} userAvatar={user?.avatar} />
+        <Canvas
+          roomCode={roomCode}
+          initialPlayerName={user?.name}
+          userAvatar={user?.avatar}
+          currentUser={user}
+        />
       </div>
     </div>
   );

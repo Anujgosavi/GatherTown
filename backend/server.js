@@ -12,14 +12,17 @@ dotenv.config();
 const iceTokenRoute = require("./routes/ice-token.js");
 const authRoutes = require("./routes/auth");
 const roomRoutes = require("./routes/rooms");
+const Room = require("./models/Room");
+const Message = require("./models/Message");
 
 // Connect to MongoDB
 const MONGO_URI =
-  process.env.MONGO_URI || "mongodb://127.0.0.1:27017/gathertown";
+  process.env.MONGO_URI ||
+  "mongodb+srv://Gather_town_user:Anuj123@cluster0.iffwygr.mongodb.net/gathertown?retryWrites=true&w=majority&appName=Cluster0";
 
 mongoose
-  .connect(MONGO_URI)
-  .then(() => console.log("MongoDB connected successfully"))
+  .connect(MONGO_URI, { dbName: "gathertown" })
+  .then(() => console.log("MongoDB connected successfully to database: gathertown"))
   .catch((err) => {
     console.warn(
       "MongoDB connection warning (database features will retry):",
@@ -93,6 +96,7 @@ function getRoom(code = "default") {
     rooms[normalized] = {
       players: {},
       users: {}, // username -> socketId
+      userMeta: {}, // socketId -> { username, userId }
       chatMap: new Map(),
       meetingRoomParticipants: new Set(),
     };
@@ -121,6 +125,23 @@ io.on("connection", (socket) => {
     const room = getRoom(normalizedRoom);
 
     const effectiveName = playerName || `Player-${socket.id.substr(0, 4)}`;
+
+    // Auto-persist room to MongoDB if it does not exist yet
+    if (normalizedRoom && normalizedRoom !== "default") {
+      Room.findOne({ code: normalizedRoom })
+        .then(async (existingRoom) => {
+          if (!existingRoom) {
+            console.log(`[MongoDB] Auto-persisting room "${normalizedRoom}" to database`);
+            await Room.create({
+              name: `Space ${normalizedRoom.toUpperCase()}`,
+              code: normalizedRoom,
+              ownerName: effectiveName,
+              isPrivate: false,
+            });
+          }
+        })
+        .catch((err) => console.error("Error auto-persisting room:", err.message));
+    }
 
     // Clean up any ghost players with the same name or old socket IDs
     if (effectiveName && effectiveName !== "Explorer") {
@@ -183,72 +204,285 @@ io.on("connection", (socket) => {
 
   // ===== CHAT FUNCTIONALITY =====
 
-  // Register username in room
-  socket.on("register", (username) => {
+  // Register username in room (supports string or { username, userId })
+  socket.on("register", (data) => {
     const room = getRoom(socket.roomCode);
-    room.users[username] = socket.id;
+    const username = typeof data === "object" ? data.username : data;
+    const userId = typeof data === "object" ? data.userId : null;
 
-    if (room.players[socket.id]) {
-      room.players[socket.id].name = username;
-      io.to(socket.roomCode).emit("playerMoved", room.players[socket.id]);
+    if (username) {
+      room.users[username] = socket.id;
+      room.userMeta = room.userMeta || {};
+      room.userMeta[socket.id] = { username, userId };
+
+      if (room.players[socket.id]) {
+        room.players[socket.id].name = username;
+        io.to(socket.roomCode).emit("playerMoved", room.players[socket.id]);
+      }
+
+      console.log(
+        `User ${username} registered in room ${socket.roomCode} (${socket.id})`
+      );
+      io.to(socket.roomCode).emit("onlineUserswithnames", room.users);
     }
-
-    console.log(
-      `User ${username} registered in room ${socket.roomCode} (${socket.id})`
-    );
-    io.to(socket.roomCode).emit("onlineUserswithnames", room.users);
   });
 
-  // Send direct message
-  socket.on("sendMessage", ({ listner, message }) => {
-    const room = getRoom(socket.roomCode);
-    const key = [listner, socket.id].sort().join("|");
-
-    if (!room.chatMap.has(key)) {
-      room.chatMap.set(key, []);
-    }
-
-    const senderUsername =
-      Object.keys(room.users).find((k) => room.users[k] === socket.id) ||
-      (room.players[socket.id]
-        ? room.players[socket.id].name
-        : `User-${socket.id.substr(0, 4)}`);
-
-    const msgObj = {
-      sender: socket.id,
+  // Send direct message with MongoDB persistence
+  socket.on(
+    "sendMessage",
+    async ({
+      listner,
       message,
       senderUsername,
-      timestamp: new Date(),
-    };
+      recipientUsername,
+      senderUserId,
+      recipientUserId,
+    }) => {
+      try {
+        if (!message || !message.trim()) return;
 
-    room.chatMap.get(key).push(msgObj);
+        const room = getRoom(socket.roomCode);
 
-    io.to(listner).emit("receive_message_sec", room.chatMap.get(key), socket.id);
-    socket.emit("receive_message", room.chatMap.get(key));
+        const sUser =
+          senderUsername ||
+          room.userMeta?.[socket.id]?.username ||
+          Object.keys(room.users).find((k) => room.users[k] === socket.id) ||
+          room.players[socket.id]?.name ||
+          `User-${socket.id.substr(0, 4)}`;
+
+        const rUser =
+          recipientUsername ||
+          room.userMeta?.[listner]?.username ||
+          Object.keys(room.users).find((k) => room.users[k] === listner) ||
+          room.players[listner]?.name ||
+          `User-${listner ? listner.substr(0, 4) : "anon"}`;
+
+        const convKey = [sUser.toLowerCase(), rUser.toLowerCase()]
+          .sort()
+          .join("::");
+        const sId =
+          senderUserId || room.userMeta?.[socket.id]?.userId || null;
+        const rId =
+          recipientUserId || room.userMeta?.[listner]?.userId || null;
+
+        // Save to MongoDB
+        let savedMsgDoc = null;
+        try {
+          const msgDoc = new Message({
+            roomCode: socket.roomCode,
+            conversationKey: convKey,
+            senderId: sId,
+            senderUsername: sUser,
+            recipientId: rId,
+            recipientUsername: rUser,
+            message: message.trim(),
+            isEdited: false,
+            isDeleted: false,
+          });
+          savedMsgDoc = await msgDoc.save();
+        } catch (dbErr) {
+          console.error("Error saving message to MongoDB:", dbErr.message);
+        }
+
+        // Query past messages from MongoDB for this conversation in this room
+        let formattedHistory = [];
+        try {
+          const historyDocs = await Message.find({
+            roomCode: socket.roomCode,
+            conversationKey: convKey,
+            isDeleted: { $ne: true },
+          })
+            .sort({ createdAt: 1 })
+            .limit(100);
+
+          formattedHistory = historyDocs.map((doc) => ({
+            _id: doc._id.toString(),
+            sender:
+              doc.senderUsername.toLowerCase() === sUser.toLowerCase()
+                ? socket.id
+                : room.users[doc.senderUsername] || doc.senderUsername,
+            senderUsername: doc.senderUsername,
+            senderId: doc.senderId,
+            recipientUsername: doc.recipientUsername,
+            message: doc.message,
+            createdAt: doc.createdAt,
+            timestamp: doc.createdAt,
+            isEdited: doc.isEdited,
+            editedAt: doc.editedAt,
+            isDeleted: doc.isDeleted,
+          }));
+        } catch (qErr) {
+          console.error("Error fetching message history:", qErr.message);
+        }
+
+        if (formattedHistory.length === 0) {
+          formattedHistory = [
+            {
+              _id: savedMsgDoc
+                ? savedMsgDoc._id.toString()
+                : `temp-${Date.now()}`,
+              sender: socket.id,
+              senderUsername: sUser,
+              senderId: sId,
+              recipientUsername: rUser,
+              message: message.trim(),
+              createdAt: new Date(),
+              timestamp: new Date(),
+              isEdited: false,
+              isDeleted: false,
+            },
+          ];
+        }
+
+        const singleMsgObj = {
+          _id: savedMsgDoc
+            ? savedMsgDoc._id.toString()
+            : `temp-${Date.now()}`,
+          sender: socket.id,
+          senderUsername: sUser,
+          senderId: sId,
+          recipient: listner,
+          recipientUsername: rUser,
+          message: message.trim(),
+          createdAt: savedMsgDoc ? savedMsgDoc.createdAt : new Date(),
+          timestamp: savedMsgDoc ? savedMsgDoc.createdAt : new Date(),
+          isEdited: false,
+          isDeleted: false,
+        };
+
+        // Emit to recipient
+        if (listner) {
+          io.to(listner).emit(
+            "receive_message_sec",
+            formattedHistory,
+            socket.id,
+            singleMsgObj
+          );
+          io.to(listner).emit("message_sent", formattedHistory, socket.id);
+        }
+
+        // Emit to sender
+        socket.emit("receive_message", formattedHistory);
+      } catch (err) {
+        console.error("Error in sendMessage handler:", err);
+      }
+    }
+  );
+
+  // Helper for fetching chat history
+  const fetchAndEmitChatHistory = async (param) => {
+    try {
+      const room = getRoom(socket.roomCode);
+      let targetSocketId =
+        typeof param === "string" ? param : param?.listner || param?.targetId;
+      let targetUsername =
+        typeof param === "object" ? param.targetUsername : null;
+
+      if (!targetUsername && targetSocketId) {
+        targetUsername =
+          room.userMeta?.[targetSocketId]?.username ||
+          Object.keys(room.users).find(
+            (k) => room.users[k] === targetSocketId
+          ) ||
+          room.players[targetSocketId]?.name;
+      }
+
+      const currentUsername =
+        room.userMeta?.[socket.id]?.username ||
+        Object.keys(room.users).find((k) => room.users[k] === socket.id) ||
+        room.players[socket.id]?.name;
+
+      if (currentUsername && targetUsername) {
+        const convKey = [
+          currentUsername.toLowerCase(),
+          targetUsername.toLowerCase(),
+        ]
+          .sort()
+          .join("::");
+
+        const historyDocs = await Message.find({
+          roomCode: socket.roomCode,
+          conversationKey: convKey,
+          isDeleted: { $ne: true },
+        })
+          .sort({ createdAt: 1 })
+          .limit(100);
+
+        const formattedHistory = historyDocs.map((doc) => ({
+          _id: doc._id.toString(),
+          sender:
+            doc.senderUsername.toLowerCase() === currentUsername.toLowerCase()
+              ? socket.id
+              : room.users[doc.senderUsername] ||
+                targetSocketId ||
+                doc.senderUsername,
+          senderUsername: doc.senderUsername,
+          senderId: doc.senderId,
+          recipientUsername: doc.recipientUsername,
+          message: doc.message,
+          createdAt: doc.createdAt,
+          timestamp: doc.createdAt,
+          isEdited: doc.isEdited,
+          editedAt: doc.editedAt,
+          isDeleted: doc.isDeleted,
+        }));
+
+        socket.emit("receive_message", formattedHistory);
+      } else {
+        socket.emit("receive_message", []);
+      }
+    } catch (err) {
+      console.error("Error in getChatHistory handler:", err);
+      socket.emit("receive_message", []);
+    }
+  };
+
+  socket.on("getChatHistory", fetchAndEmitChatHistory);
+  socket.on("getchathistory", fetchAndEmitChatHistory);
+
+  // Edit message in MongoDB
+  socket.on("editMessage", async ({ messageId, newMessage, listner }) => {
+    try {
+      if (!messageId || !newMessage || !newMessage.trim()) return;
+      const trimmed = newMessage.trim();
+
+      const updated = await Message.findByIdAndUpdate(
+        messageId,
+        { message: trimmed, isEdited: true, editedAt: new Date() },
+        { new: true }
+      );
+
+      const payload = {
+        messageId,
+        newMessage: trimmed,
+        isEdited: true,
+        editedAt: updated ? updated.editedAt : new Date(),
+      };
+
+      socket.emit("message_edited", payload);
+      if (listner) {
+        io.to(listner).emit("message_edited", payload);
+      }
+    } catch (err) {
+      console.error("Error editing message:", err);
+    }
   });
 
-  // Get chat history
-  socket.on("getChatHistory", (userKey) => {
-    const room = getRoom(socket.roomCode);
-    const key = [userKey, socket.id].sort().join("|");
+  // Delete message in MongoDB (soft delete)
+  socket.on("deleteMessage", async ({ messageId, listner }) => {
+    try {
+      if (!messageId) return;
 
-    if (!room.chatMap.has(key)) {
-      room.chatMap.set(key, []);
+      await Message.findByIdAndUpdate(messageId, { isDeleted: true });
+
+      const payload = { messageId };
+      socket.emit("message_deleted", payload);
+      if (listner) {
+        io.to(listner).emit("message_deleted", payload);
+      }
+    } catch (err) {
+      console.error("Error deleting message:", err);
     }
-
-    socket.emit("receive_message", room.chatMap.get(key));
-  });
-
-  // Backward compatibility alias for getChatHistory
-  socket.on("getchathistory", (userKey) => {
-    const room = getRoom(socket.roomCode);
-    const key = [userKey, socket.id].sort().join("|");
-
-    if (!room.chatMap.has(key)) {
-      room.chatMap.set(key, []);
-    }
-
-    socket.emit("receive_message", room.chatMap.get(key));
   });
 
   // ===== VOICE / VIDEO CALL POPUP =====
@@ -388,6 +622,9 @@ io.on("connection", (socket) => {
     if (username) {
       delete room.users[username];
       console.log(`User ${username} removed from room ${socket.roomCode}`);
+    }
+    if (room.userMeta && room.userMeta[socket.id]) {
+      delete room.userMeta[socket.id];
     }
     io.to(socket.roomCode).emit("onlineUserswithnames", room.users);
 

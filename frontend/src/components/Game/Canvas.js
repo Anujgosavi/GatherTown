@@ -27,6 +27,7 @@ const Canvas = ({
   roomCode = "default",
   initialPlayerName = "",
   userAvatar = "chr1",
+  currentUser = null,
 }) => {
   const canvasRef = useRef(null);
   const [ctx, setCtx] = useState(null);
@@ -40,6 +41,42 @@ const Canvas = ({
     e: false,
   });
   const [showChat, setShowChat] = useState(false);
+  const [chatTargetId, setChatTargetId] = useState(null);
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
+  const [chatToast, setChatToast] = useState(null);
+  const showChatRef = useRef(false);
+  const chatTargetIdRef = useRef(null);
+  const otherPlayersRef = useRef({});
+
+  // Synthetic pleasant Web Audio API notification chime
+  const playChatNotificationSound = useCallback(() => {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const actx = new AudioCtx();
+      const now = actx.currentTime;
+
+      const osc = actx.createOscillator();
+      const gain = actx.createGain();
+
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(587.33, now); // D5
+      osc.frequency.exponentialRampToValueAtTime(880, now + 0.12); // A5
+
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.linearRampToValueAtTime(0.18, now + 0.04);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.32);
+
+      osc.connect(gain);
+      gain.connect(actx.destination);
+
+      osc.start(now);
+      osc.stop(now + 0.32);
+    } catch (e) {
+      // Audio autoplay policy
+    }
+  }, []);
+
   const [showNameModal, setShowNameModal] = useState(!initialPlayerName);
   const [tempPlayerName, setTempPlayerName] = useState(initialPlayerName || "");
   const [incomingCall, setIncomingCall] = useState(null);
@@ -120,6 +157,30 @@ const Canvas = ({
     meetingScreenStreamRef,
   } = useGame(canvasRef, socketRef, keysRef);
 
+  useEffect(() => {
+    otherPlayersRef.current = otherPlayers;
+  }, [otherPlayers]);
+
+  useEffect(() => {
+    showChatRef.current = showChat;
+    if (showChat) {
+      setUnreadChatCount(0);
+    }
+  }, [showChat]);
+
+  useEffect(() => {
+    chatTargetIdRef.current = chatTargetId;
+  }, [chatTargetId]);
+
+  useEffect(() => {
+    if (chatToast) {
+      const timer = setTimeout(() => {
+        setChatToast(null);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [chatToast]);
+
   const handleMeetingDragMouseDown = (e) => {
     if (isMeetingMaximized || isMeetingMinimized) return;
     isMeetingDraggingRef.current = true;
@@ -177,7 +238,39 @@ const Canvas = ({
         playerName: activeName,
         avatar: userAvatar,
       });
-      socket.emit("register", activeName);
+      socket.emit("register", {
+        username: activeName,
+        userId: currentUser?.id || currentUser?._id || null,
+      });
+    });
+
+    // Real-time incoming message notification listener
+    socket.on("receive_message_sec", (chatList, fromSocketId, singleMsg) => {
+      const isChatActiveWithSender =
+        showChatRef.current && chatTargetIdRef.current === fromSocketId;
+
+      if (!isChatActiveWithSender) {
+        setUnreadChatCount((prev) => prev + 1);
+        playChatNotificationSound();
+
+        const sName =
+          singleMsg?.senderUsername ||
+          (otherPlayersRef.current &&
+            otherPlayersRef.current[fromSocketId]?.name) ||
+          `Player ${fromSocketId ? fromSocketId.slice(-4) : "User"}`;
+
+        const rawMsg = singleMsg?.message || "";
+        const preview =
+          rawMsg.startsWith("http://") || rawMsg.startsWith("https://")
+            ? "📎 Sent an attachment"
+            : rawMsg || "New message";
+
+        setChatToast({
+          senderName: sName,
+          message: preview.length > 50 ? preview.slice(0, 50) + "..." : preview,
+          senderSocketId: fromSocketId,
+        });
+      }
     });
 
     return () => {
@@ -1085,9 +1178,6 @@ const Canvas = ({
     }
   };
 
-  // Add this state to track which user to chat with
-  const [chatTargetId, setChatTargetId] = useState(null);
-
   // Function to open chat with a specific user
   const openChatWithUser = (userId) => {
     setShowChat(true);
@@ -1448,30 +1538,177 @@ const Canvas = ({
 
         <button
           className="chat-button"
-          onClick={() => setShowChat(!showChat)}
+          onClick={() => {
+            const next = !showChat;
+            setShowChat(next);
+            if (next) setUnreadChatCount(0);
+          }}
           style={{
             position: "absolute",
             bottom: "20px",
             right: "20px",
-            backgroundColor: "#4CAF50",
+            backgroundColor: "#2563eb",
             border: "none",
             borderRadius: "50%",
-            width: "50px",
-            height: "50px",
+            width: "52px",
+            height: "52px",
             cursor: "pointer",
-            boxShadow: "0 2px 5px rgba(0,0,0,0.2)",
+            boxShadow: "0 4px 14px rgba(37, 99, 235, 0.4)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
+            transition: "all 0.2s ease",
+            zIndex: 1000,
           }}
+          title="Open Spatial Chat"
         >
           <MessageCircle
             style={{
-              width: "30px",
-              height: "30px",
+              width: "26px",
+              height: "26px",
+              color: "white",
             }}
           />
+          {unreadChatCount > 0 && (
+            <span
+              style={{
+                position: "absolute",
+                top: "-4px",
+                right: "-4px",
+                backgroundColor: "#ef4444",
+                color: "white",
+                borderRadius: "10px",
+                padding: "2px 6px",
+                fontSize: "11px",
+                fontWeight: "bold",
+                border: "2px solid #0f172a",
+                minWidth: "18px",
+                textAlign: "center",
+                boxShadow: "0 2px 6px rgba(0,0,0,0.4)",
+              }}
+            >
+              {unreadChatCount > 9 ? "9+" : unreadChatCount}
+            </span>
+          )}
         </button>
+
+        {/* Floating Glassmorphic Incoming Message Toast */}
+        {chatToast && (
+          <div
+            onClick={() => {
+              setShowChat(true);
+              setChatTargetId(chatToast.senderSocketId);
+              setUnreadChatCount(0);
+              setChatToast(null);
+            }}
+            style={{
+              position: "fixed",
+              bottom: "84px",
+              right: "20px",
+              background: "rgba(15, 23, 42, 0.94)",
+              backdropFilter: "blur(14px)",
+              border: "1px solid rgba(59, 130, 246, 0.4)",
+              borderRadius: "14px",
+              padding: "12px 16px",
+              display: "flex",
+              alignItems: "center",
+              gap: "12px",
+              cursor: "pointer",
+              boxShadow:
+                "0 12px 28px rgba(0, 0, 0, 0.5), 0 0 20px rgba(59, 130, 246, 0.25)",
+              zIndex: 3000,
+              maxWidth: "340px",
+              minWidth: "260px",
+            }}
+          >
+            <div
+              style={{
+                width: "36px",
+                height: "36px",
+                borderRadius: "50%",
+                background: "linear-gradient(135deg, #3b82f6, #1d4ed8)",
+                color: "white",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontWeight: "bold",
+                fontSize: "13px",
+                flexShrink: 0,
+                boxShadow: "0 2px 6px rgba(0,0,0,0.3)",
+              }}
+            >
+              {chatToast.senderName.slice(0, 2).toUpperCase()}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  marginBottom: "2px",
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: "13px",
+                    fontWeight: "700",
+                    color: "#60a5fa",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  {chatToast.senderName}
+                </span>
+                <span style={{ fontSize: "10.5px", color: "#94a3b8" }}>
+                  just now
+                </span>
+              </div>
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: "12px",
+                  color: "#f1f5f9",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {chatToast.message}
+              </p>
+              <span
+                style={{
+                  fontSize: "10px",
+                  color: "#38bdf8",
+                  marginTop: "3px",
+                  display: "block",
+                  fontWeight: "500",
+                }}
+              >
+                Click to reply 💬
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setChatToast(null);
+              }}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "#64748b",
+                fontSize: "18px",
+                cursor: "pointer",
+                padding: "2px 4px",
+                lineHeight: 1,
+              }}
+              title="Dismiss"
+            >
+              ×
+            </button>
+          </div>
+        )}
       </div>
       {/* Incoming Call Popup */}
       {incomingCall && (
@@ -2279,38 +2516,39 @@ const Canvas = ({
             position: "fixed",
             right: "20px",
             bottom: "80px",
-            width: "800px",
-            height: "70vh",
-            backgroundColor: "white",
-            borderRadius: "15px",
+            width: "820px",
+            height: "72vh",
+            backgroundColor: "#0f172a",
+            borderRadius: "16px",
             boxShadow:
-              "0 10px 25px rgba(0,0,0,0.3), 0 6px 12px rgba(74, 108, 247, 0.2)",
+              "0 20px 45px rgba(0,0,0,0.6), 0 0 25px rgba(59, 130, 246, 0.2)",
             zIndex: 1000,
             overflow: "hidden",
-            border: "2px solid rgba(74, 108, 247, 0.1)",
-            background: "linear-gradient(to bottom right, #ffffff, #f0f4ff)",
+            border: "1px solid rgba(255, 255, 255, 0.12)",
           }}
         >
           <button
             onClick={() => setShowChat(false)}
             style={{
               position: "absolute",
-              right: "10px",
-              top: "10px",
-              backgroundColor: "#ff4b4b",
-              border: "none",
+              right: "12px",
+              top: "12px",
+              backgroundColor: "rgba(239, 68, 68, 0.2)",
+              border: "1px solid rgba(239, 68, 68, 0.4)",
               borderRadius: "50%",
-              width: "30px",
-              height: "30px",
-              color: "white",
-              fontSize: "18px",
+              width: "28px",
+              height: "28px",
+              color: "#f87171",
+              fontSize: "16px",
               cursor: "pointer",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               boxShadow: "0 2px 5px rgba(0,0,0,0.2)",
               zIndex: 1001,
+              transition: "all 0.15s ease",
             }}
+            title="Close Chat"
           >
             ×
           </button>
@@ -2318,6 +2556,7 @@ const Canvas = ({
             username={playerName}
             socket={socketRef.current}
             chatTargetId={chatTargetId}
+            currentUser={currentUser}
           />
         </div>
       )}
