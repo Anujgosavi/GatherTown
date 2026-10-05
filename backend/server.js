@@ -120,10 +120,23 @@ io.on("connection", (socket) => {
 
     const room = getRoom(normalizedRoom);
 
+    const effectiveName = playerName || `Player-${socket.id.substr(0, 4)}`;
+
+    // Clean up any ghost players with the same name or old socket IDs
+    if (effectiveName && effectiveName !== "Explorer") {
+      Object.keys(room.players).forEach((oldId) => {
+        if (oldId !== socket.id && room.players[oldId].name === effectiveName) {
+          console.log(`Cleaning up ghost player "${effectiveName}" (${oldId})`);
+          delete room.players[oldId];
+          io.to(normalizedRoom).emit("playerDisconnected", oldId);
+        }
+      });
+    }
+
     const newPlayer = {
-      position: { x: 300, y: 300 },
+      position: room.players[socket.id]?.position || { x: 300, y: 300 },
       direction: "down",
-      name: playerName || `Player-${socket.id.substr(0, 4)}`,
+      name: effectiveName,
       avatar: avatar || "chr1",
       id: socket.id,
       moving: false,
@@ -155,7 +168,7 @@ io.on("connection", (socket) => {
     socket.emit("currentPlayers", currentOtherPlayers);
   });
 
-  // Handle player movement within their room
+  // Handle player movement within their room (broadcast only to other peers to eliminate network echo)
   socket.on("playerMovement", (movementData) => {
     const room = getRoom(socket.roomCode);
     if (room.players[socket.id]) {
@@ -163,8 +176,8 @@ io.on("connection", (socket) => {
         ...room.players[socket.id],
         ...movementData,
       };
-      // Broadcast to all players in the same room
-      io.to(socket.roomCode).emit("playerMoved", room.players[socket.id]);
+      // Broadcast to other players in the same room (excludes sender to save 50% bandwidth)
+      socket.to(socket.roomCode).emit("playerMoved", room.players[socket.id]);
     }
   });
 
@@ -354,11 +367,19 @@ io.on("connection", (socket) => {
     console.log(`User disconnected: ${socket.id} from room ${socket.roomCode}`);
     const room = getRoom(socket.roomCode);
 
-    // Player cleanup
+    // Player cleanup in active room
     if (room.players[socket.id]) {
       delete room.players[socket.id];
       io.to(socket.roomCode).emit("playerDisconnected", socket.id);
     }
+
+    // Safety sweep: ensure socket is deleted across all rooms if any ghost reference exists
+    Object.keys(rooms).forEach((rc) => {
+      if (rooms[rc].players && rooms[rc].players[socket.id]) {
+        delete rooms[rc].players[socket.id];
+        io.to(rc).emit("playerDisconnected", socket.id);
+      }
+    });
 
     // Chat cleanup
     const username = Object.keys(room.users).find(

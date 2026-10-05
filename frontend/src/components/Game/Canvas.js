@@ -53,6 +53,8 @@ const Canvas = ({
   const localVideoRef = useRef(null);
   const [callPeerId, setCallPeerId] = useState(null);
   const callPeerIdRef = useRef(null);
+  const isCallInitiatorRef = useRef(false);
+  const lastMovementEmitRef = useRef(0);
 
   // 1-on-1 Screen Sharing states
   const [isScreenSharing, setIsScreenSharing] = useState(false);
@@ -161,13 +163,15 @@ const Canvas = ({
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    const context = canvas.getContext("2d");
-    setCtx(context);
+    if (canvas) {
+      const context = canvas.getContext("2d");
+      setCtx(context);
+    }
     const socket = io(SOCKET_URL, { transports: ["websocket"] });
     socketRef.current = socket;
 
     socket.on("connect", () => {
-      const activeName = initialPlayerName || tempPlayerName || "Explorer";
+      const activeName = initialPlayerName || "Explorer";
       socket.emit("joinRoom", {
         roomCode,
         playerName: activeName,
@@ -180,7 +184,8 @@ const Canvas = ({
       socket.disconnect();
       cancelAnimationFrame(animationFrameRef.current);
     };
-  }, [roomCode, initialPlayerName, tempPlayerName, userAvatar, SOCKET_URL]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomCode, SOCKET_URL]);
 
   // Fetch ICE servers from backend on mount
   useEffect(() => {
@@ -319,6 +324,7 @@ const Canvas = ({
         callPeerIdRef.current = targetId;
         setCallPeerId(targetId);
         setCallPeerName(targetName);
+        isCallInitiatorRef.current = true;
         setVideoCall((vc) => ({ ...vc, active: true }));
         if (socketRef.current) {
           socketRef.current.emit("callUser", {
@@ -372,6 +378,7 @@ const Canvas = ({
     const targetPeer = callPeerIdRef.current || callPeerId;
     callPeerIdRef.current = null;
     setCallPeerId(null);
+    isCallInitiatorRef.current = false;
 
     if (peerConnectionRef.current) {
       peerConnectionRef.current.close();
@@ -396,10 +403,11 @@ const Canvas = ({
   // Accept incoming call
   const handleAcceptCall = async () => {
     try {
-      if (!iceConfig) return; // Wait for ICE config
+      isCallInitiatorRef.current = false; // Mark that we are CALLEE
       setIncomingCall(null);
-      callPeerIdRef.current = incomingCall.callerId;
-      setCallPeerId(incomingCall.callerId); // <-- Fix: use incomingCall.callerId, not interactingMenu
+      const callerId = incomingCall.callerId;
+      callPeerIdRef.current = callerId;
+      setCallPeerId(callerId);
       setCallPeerName(incomingCall.callerName || "Colleague");
       setVideoCall((vc) => ({ ...vc, active: true }));
 
@@ -412,6 +420,11 @@ const Canvas = ({
       micAudioTrackRef.current = localStream.getAudioTracks()[0];
       setVideoCall((vc) => ({ ...vc, localStream }));
 
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = localStream;
+        localVideoRef.current.play().catch(() => { });
+      }
+
       // --- Ensure RTCConfiguration is always valid ---
       let rtcConfig = iceConfig;
       if (
@@ -419,13 +432,18 @@ const Canvas = ({
         typeof rtcConfig !== "object" ||
         !Array.isArray(rtcConfig.iceServers)
       ) {
-        rtcConfig = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+        rtcConfig = {
+          iceServers: [
+            { urls: "stun:stun.relay.metered.ca:80" },
+            { urls: "stun:stun.l.google.com:19302" },
+          ],
+        };
       }
       const pc = new window.RTCPeerConnection(rtcConfig);
       peerConnectionRef.current = pc;
 
       pc.oniceconnectionstatechange = () => {
-        console.log("ICE connection state:", pc.iceConnectionState);
+        console.log("[WebRTC 1-1 Callee] ICE connection state:", pc.iceConnectionState);
       };
 
       // Add local tracks
@@ -437,7 +455,7 @@ const Canvas = ({
       pc.onicecandidate = (event) => {
         if (event.candidate && socketRef.current) {
           socketRef.current.emit("ice-candidate", {
-            to: incomingCall.callerId,
+            to: callerId,
             candidate: event.candidate,
           });
         }
@@ -445,8 +463,13 @@ const Canvas = ({
 
       // Receive remote stream
       pc.ontrack = (event) => {
+        console.log("[WebRTC 1-1 Callee] ontrack received:", event.streams);
         if (event.streams && event.streams[0]) {
           setVideoCall((vc) => ({ ...vc, remoteStream: event.streams[0] }));
+          if (remoteVideoRef.current) {
+            remoteVideoRef.current.srcObject = event.streams[0];
+            remoteVideoRef.current.play().catch(() => { });
+          }
         }
       };
 
@@ -455,10 +478,11 @@ const Canvas = ({
       socketRef.current.off("ice-candidate");
 
       // ICE candidate queue for this peer
-      iceCandidateQueue.current[incomingCall.callerId] = [];
+      iceCandidateQueue.current[callerId] = [];
 
       // Create and send answer
       socketRef.current.on("offer", async ({ from, offer }) => {
+        console.log("[WebRTC 1-1 Callee] Received offer from", from);
         await pc.setRemoteDescription(new RTCSessionDescription(offer));
         // Add queued ICE candidates for this peer
         if (iceCandidateQueue.current[from]) {
@@ -474,6 +498,7 @@ const Canvas = ({
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         socketRef.current.emit("answer", { to: from, answer });
+        console.log("[WebRTC 1-1 Callee] Sent answer to", from);
       });
 
       // Listen for ICE candidates
@@ -483,7 +508,6 @@ const Canvas = ({
             if (pc.remoteDescription && pc.remoteDescription.type) {
               await pc.addIceCandidate(new RTCIceCandidate(candidate));
             } else {
-              // Queue ICE candidates until remoteDescription is set
               if (!iceCandidateQueue.current[from])
                 iceCandidateQueue.current[from] = [];
               iceCandidateQueue.current[from].push(candidate);
@@ -495,16 +519,16 @@ const Canvas = ({
       });
 
       // Notify caller to start offer
-      socketRef.current.emit("acceptCall", { to: incomingCall.callerId });
+      socketRef.current.emit("acceptCall", { to: callerId });
     } catch (error) {
       console.error("Error in handleAcceptCall:", error);
       handleEndCall();
     }
   };
 
-  // Initiate call as caller
+  // Initiate call as caller (ONLY runs when this client initiated the call)
   useEffect(() => {
-    if (!callPeerId || !videoCall.active || !iceConfig) return;
+    if (!callPeerId || !videoCall.active || !isCallInitiatorRef.current) return;
 
     let pc;
     let localStream;
@@ -525,7 +549,12 @@ const Canvas = ({
         micAudioTrackRef.current = localStream.getAudioTracks()[0];
         setVideoCall((vc) => ({ ...vc, localStream }));
 
-        // --- FIX: Ensure RTCConfiguration is always valid ---
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = localStream;
+          localVideoRef.current.play().catch(() => { });
+        }
+
+        // Ensure RTCConfiguration is always valid
         let rtcConfig = iceConfig;
         if (
           !rtcConfig ||
@@ -533,14 +562,17 @@ const Canvas = ({
           !Array.isArray(rtcConfig.iceServers)
         ) {
           rtcConfig = {
-            iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+            iceServers: [
+              { urls: "stun:stun.relay.metered.ca:80" },
+              { urls: "stun:stun.l.google.com:19302" },
+            ],
           };
         }
         pc = new window.RTCPeerConnection(rtcConfig);
         peerConnectionRef.current = pc;
 
         pc.oniceconnectionstatechange = () => {
-          console.log("Caller ICE connection state:", pc.iceConnectionState);
+          console.log("[WebRTC 1-1 Caller] ICE connection state:", pc.iceConnectionState);
         };
 
         // Add local tracks
@@ -558,8 +590,13 @@ const Canvas = ({
         };
 
         pc.ontrack = (event) => {
+          console.log("[WebRTC 1-1 Caller] ontrack received:", event.streams);
           if (event.streams && event.streams[0]) {
             setVideoCall((vc) => ({ ...vc, remoteStream: event.streams[0] }));
+            if (remoteVideoRef.current) {
+              remoteVideoRef.current.srcObject = event.streams[0];
+              remoteVideoRef.current.play().catch(() => { });
+            }
           }
         };
 
@@ -572,6 +609,7 @@ const Canvas = ({
         iceCandidateQueue.current[callPeerId] = [];
 
         socketRef.current.on("answer", async ({ from, answer }) => {
+          console.log("[WebRTC 1-1 Caller] Received answer from", from);
           if (pc.signalingState !== "closed") {
             await pc.setRemoteDescription(new RTCSessionDescription(answer));
             // Add queued ICE candidates for this peer
@@ -605,10 +643,12 @@ const Canvas = ({
         });
 
         socketRef.current.on("acceptCall", async () => {
+          console.log("[WebRTC 1-1 Caller] Callee accepted, creating offer...");
           try {
             const offer = await pc.createOffer();
             await pc.setLocalDescription(offer);
             socketRef.current.emit("offer", { to: callPeerId, offer });
+            console.log("[WebRTC 1-1 Caller] Sent offer to", callPeerId);
           } catch (error) {
             console.error("Error creating offer:", error);
           }
@@ -973,12 +1013,24 @@ const Canvas = ({
       }
     });
 
-    // Emit movement to server
+    // Emit movement to server (throttled to ~22 FPS / every 45ms to eliminate network lag)
+    const now = Date.now();
     if (moved && socketRef.current) {
+      if (now - lastMovementEmitRef.current >= 45) {
+        lastMovementEmitRef.current = now;
+        socketRef.current.emit("playerMovement", {
+          position: player.position,
+          direction: player.lastDirection,
+          moving: true,
+        });
+      }
+    } else if (!moved && player.moving && socketRef.current) {
+      // Emit idle state immediately on key release
+      player.moving = false;
       socketRef.current.emit("playerMovement", {
         position: player.position,
         direction: player.lastDirection,
-        moving: true,
+        moving: false,
       });
     }
 

@@ -206,21 +206,17 @@ const useGame = (canvasRef, socketRef, keysRef) => {
       setOtherPlayers((prev) => {
         const existing = prev[playerInfo.id];
         if (existing) {
-          // Update all fields, including name!
-          return {
-            ...prev,
-            [playerInfo.id]: new Sprite({
-              position: playerInfo.position,
-              image: playerImages?.[playerInfo.direction] || playerImages?.down,
-              frames: { max: 4 },
-              sprites: playerImages,
-              name: playerInfo.name, // <-- make sure this is updated!
-              id: playerInfo.id,
-              speed: existing.speed,
-              lastDirection: playerInfo.direction,
-              moving: playerInfo.moving,
-            }),
-          };
+          existing.position.x = playerInfo.position.x;
+          existing.position.y = playerInfo.position.y;
+          existing.lastDirection = playerInfo.direction;
+          existing.moving = Boolean(playerInfo.moving);
+          if (playerImages?.[playerInfo.direction]) {
+            existing.image = playerImages[playerInfo.direction];
+          }
+          if (playerInfo.name && existing.name !== playerInfo.name) {
+            existing.name = playerInfo.name;
+          }
+          return { ...prev };
         }
         return prev;
       });
